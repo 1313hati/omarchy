@@ -111,7 +111,7 @@ Failing closed holds on every platform: where `omarchy-hw-platform` can't settle
 
 ### App installs (`bin/omarchy-install-browser`, `bin/omarchy-install-gaming-steam`, `bin/omarchy-remove-gaming-steam`)
 
-- A browser install runs `post-install <browser>` once the browser's package, policy directory, flags file and theme are in place, and before it says the browser is installed. Steam's install runs `post-install steam` after the package and before the 32-bit drivers and the first launch, and Steam's removal runs `pre-remove steam` before its packages go, so a package the hook added that depends on Steam doesn't stop the removal.
+- A browser install runs `post-install <browser>` once the browser's package, policy directory, flags file and theme are in place, and before it says the browser is installed. Steam's install runs `post-install steam` after the 32-bit drivers and the package, and before the first launch, and Steam's removal runs `pre-remove steam` before its packages go, so a package the hook added that depends on Steam doesn't stop the removal.
 - On a platform that registers none, each call is a no-op and the installer runs as before.
 
 ### Disk password change (`bin/omarchy-drive-password`)
