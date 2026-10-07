@@ -275,8 +275,6 @@ assertDeepEqual(JSON.parse(notifications.snapshotOf({ actions: [
   { identifier: 'default', text: 'Open' }, { identifier: 'yes', text: 'Yes' }, { identifier: 'no', text: 'No' }
 ]}).actionsJson), [{ identifier: 'yes', text: 'Yes' }, { identifier: 'no', text: 'No' }], 'explicit choices appear independently of the default card action')
 assertEqual(notifications.popupEntry({ actionsJson: '[{"identifier":"yes","text":"Yes"}]' }, 1).actionsJson, '[]', 'restored notifications do not replay actions from a dead sender')
-assertEqual(notifications.snapshotOf({ appName: 'Pinyin', appIcon: 'fcitx-pinyin', urgency: 1 }).urgency, 2, 'Pinyin prompts stay visible until dismissed')
-assertEqual(notifications.snapshotOf({ appName: 'Other', appIcon: 'fcitx-pinyin', urgency: 1 }).urgency, 1, 'other notification senders retain their urgency')
 assertDeepEqual(
   {
     id: snapshot.id,

@@ -16,6 +16,19 @@ spec.loader.exec_module(setup)
 
 
 class InputMethodTest(unittest.TestCase):
+  def test_pinyin_defaults_suppress_cloud_prompt(self):
+    setup.defaults(self.config, fresh=True)
+    pinyin = setup.values((self.config / "fcitx5/conf/pinyin.conf").read_text())
+    self.assertEqual(pinyin["FirstRun"], "False")
+    self.assertEqual(pinyin["CloudPinyinEnabled"], "False")
+
+  def test_pinyin_prompt_suppression_preserves_existing_preferences(self):
+    pinyin = self.config / "fcitx5/conf/pinyin.conf"
+    pinyin.parent.mkdir(parents=True)
+    pinyin.write_text("FirstRun=True\nCloudPinyinEnabled=True\nPageSize=7\n")
+    setup.defaults(self.config)
+    self.assertEqual(pinyin.read_text(), "FirstRun=False\nCloudPinyinEnabled=True\nPageSize=7\n")
+
   def setUp(self):
     self.temporary = tempfile.TemporaryDirectory()
     self.addCleanup(self.temporary.cleanup)

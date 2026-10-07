@@ -74,7 +74,7 @@ def key_list(entries):
 
 def defaults(config_home, fresh=False):
   changed = False
-  files = ["config", "conf/quickphrase.conf", "conf/wayland.conf", "conf/xcb.conf"]
+  files = ["config", "conf/quickphrase.conf", "conf/wayland.conf", "conf/xcb.conf", "conf/pinyin.conf"]
   for name in files:
     target = config_home / "fcitx5" / name
     original = read(target)
@@ -104,6 +104,16 @@ def defaults(config_home, fresh=False):
           additions.append(f"[{section}]\n" + "".join(f"{key}={value}\n" for key, value in entries.items()))
       if additions:
         changed |= atomic_write(target, original.rstrip() + ("\n\n" if original.strip() else "") + "\n".join(additions))
+    elif name == "conf/pinyin.conf":
+      # Suppress the first-use cloud prompt while preserving any explicit
+      # cloud-prediction preference and all other existing engine settings.
+      if not original:
+        updated = shipped
+      elif "FirstRun" in values(original):
+        updated = re.sub(r"(?m)^\s*FirstRun\s*=.*$", "FirstRun=False", original)
+      else:
+        updated = "FirstRun=False\n" + original
+      changed |= atomic_write(target, updated)
     elif not target.exists() and not target.is_symlink():
       changed |= atomic_write(target, shipped)
   return changed
@@ -123,7 +133,7 @@ def activation_default():
 @contextmanager
 def transaction(config_home, live=False):
   data_home = Path(os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local/share"))
-  paths = [config_home / "fcitx5" / name for name in ["profile", "config", "conf/quickphrase.conf", "conf/wayland.conf", "conf/xcb.conf"]]
+  paths = [config_home / "fcitx5" / name for name in ["profile", "config", "conf/quickphrase.conf", "conf/wayland.conf", "conf/xcb.conf", "conf/pinyin.conf"]]
   paths += [config_home / "fontconfig/conf.d/50-omarchy-input-method.conf", data_home / "dbus-1/services/org.fcitx.Fcitx5.service"]
   before = {path.resolve(): path.read_text() if path.exists() else None for path in paths}
   try:
