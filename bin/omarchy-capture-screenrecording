@@ -113,7 +113,7 @@ start_webcam_overlay() {
     '--vf=lavfi=[crop=ih*8/9:ih]' \
     --title="WebcamOverlay" --wayland-app-id="WebcamOverlay-$WEBCAM_SIZE" \
     --no-border --no-audio --no-osc --osd-level=0 \
-    --really-quiet &>/dev/null &
+    --really-quiet 9>&- &>/dev/null &
 
   # The move has to settle before gpu-screen-recorder starts, or the camera is
   # recorded sliding into its corner. Waiting for the map is what the blind
@@ -267,16 +267,11 @@ launch_wf_recorder() {
   # needlessly large files. -R 48000 keeps the AAC track at 48 kHz rather than
   # following a sink that advertises 96 kHz into a file many players, and some
   # speaker DSPs, play as silence.
-  wf-recorder "${geom_args[@]}" -r 60 -R 48000 "${audio_args[@]}" -f "$filename" 2>>"$LOG_FILE" &
+  wf-recorder "${geom_args[@]}" -r 60 -R 48000 "${audio_args[@]}" -f "$filename" 9>&- 2>>"$LOG_FILE" &
   REC_PID=$!
 }
 
 start_screenrecording() {
-  mkdir -p "$RUNTIME_DIR" || return 1
-  # XDG_STATE_HOME may be outside a private home; protect existing fallbacks too.
-  if [[ -z ${XDG_RUNTIME_DIR:-} ]]; then
-    chmod 700 "$RUNTIME_DIR" || return 1
-  fi
   # A pid left by a recording that ended without a stop would otherwise hide
   # this one from the toggle until it has started and saved its own.
   rm -f "$REC_PID_FILE"
@@ -333,7 +328,7 @@ start_screenrecording() {
 
       [[ -n $audio_devices ]] && audio_args+=(-a "$audio_devices" -ac aac)
 
-      gpu-screen-recorder "${capture_args[@]}" -k auto -f 60 -fm cfr -fallback-cpu-encoding yes -o "$filename" "${audio_args[@]}" 2>>"$LOG_FILE" &
+      gpu-screen-recorder "${capture_args[@]}" -k auto -f 60 -fm cfr -fallback-cpu-encoding yes -o "$filename" "${audio_args[@]}" 9>&- 2>>"$LOG_FILE" &
       pid=$!
     fi
 
@@ -407,7 +402,7 @@ stop_screenrecording() {
     (
       sleep 2
       rm -f "$preview"
-    ) &
+    ) 9>&- &
   fi
 
   rm -f "$RECORDING_FILE" "$REC_PID_FILE"
@@ -460,15 +455,32 @@ finalize_recording() {
   fi
 }
 
-if [[ $STATUS == "true" ]]; then
-  screenrecording_active
-elif screenrecording_active; then
-  stop_screenrecording
-elif [[ $STOP_RECORDING == "true" ]]; then
-  exit 1
-else
-  start_screenrecording || {
-    wf_audio_cleanup
-    cleanup_webcam
-  }
+mkdir -p "$RUNTIME_DIR" || exit 1
+# XDG_STATE_HOME may be outside a private home; protect existing fallbacks too.
+if [[ -z ${XDG_RUNTIME_DIR:-} ]]; then
+  chmod 700 "$RUNTIME_DIR" || exit 1
 fi
+
+# Serialize changes to the recorder and its files; background children close 9.
+# A busy status query stays read-only so a picker cannot stall the bar.
+{
+  if [[ $STATUS == "true" ]]; then
+    if flock -n 9; then
+      screenrecording_active
+    else
+      select_recorder && omarchy-capture-screenrecording-process "${RECORDER[@]}"
+    fi
+  else
+    flock 9 || exit 1
+    if screenrecording_active; then
+      stop_screenrecording
+    elif [[ $STOP_RECORDING == "true" ]]; then
+      exit 1
+    else
+      start_screenrecording || {
+        wf_audio_cleanup
+        cleanup_webcam
+      }
+    fi
+  fi
+} 9>>"$RUNTIME_DIR/omarchy-screenrecord.lock"
