@@ -13,6 +13,15 @@ local vconsole = os.getenv("OMARCHY_VCONSOLE")
 local real_open = io.open
 
 io.open = function(path, mode)
+  if path == "/etc/omarchy/input-method" then
+    local preference = os.getenv("TEST_INPUT_PREFERENCE")
+    if not preference then return nil end
+    local file = io.tmpfile()
+    file:write(preference)
+    file:seek("set")
+    return file
+  end
+
   if path ~= "/etc/vconsole.conf" then
     return real_open(path, mode)
   end
@@ -128,3 +137,5 @@ sddm_layouts=$(sed -n '/^local non_latin_layouts =/,+1p' "$sddm_lua" | grep -o '
 [[ $hooks_layouts == "$sddm_layouts" ]] ||
   fail "greeter non-latin layout list stays in sync" "$(diff <(echo "$hooks_layouts") <(echo "$sddm_layouts"))"
 pass "greeter non-latin layout list stays in sync with the initramfs hook"
+
+TEST_INPUT_PREFERENCE=$'INPUT_METHOD=hangul\n XKB_LAYOUT="kr" # desktop only\n' assert_input "Korean selection overrides desktop layout and clears the US variant" "[kr] [] [$base_options]" $'XKBLAYOUT=us\nXKBVARIANT=intl\n'

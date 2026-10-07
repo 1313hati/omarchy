@@ -1,0 +1,20 @@
+# Leave Ctrl+Space to tmux/Herdr and the Super shortcuts to the desktop.
+[Hotkey/TriggerKeys]
+0=Control+Shift+space
+1=Zenkaku_Hankaku
+2=Hangul
+
+[Hotkey/ActivateKeys]
+0=Henkan
+
+[Hotkey/DeactivateKeys]
+0=Muhenkan
+
+[Hotkey/AltTriggerKeys]
+
+[Hotkey/EnumerateGroupForwardKeys]
+
+[Hotkey/EnumerateGroupBackwardKeys]
+
+[Behavior]
+ActiveByDefault=False

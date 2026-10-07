@@ -599,6 +599,7 @@ keyboard_form() {
   done
 
   apply_keyboard "$keyboard"
+  omarchy_persist_input_selection
 }
 
 confirm_reboot() {

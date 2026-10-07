@@ -59,7 +59,13 @@ On Dell XPS laptops with a haptic touchpad, you can also set the click strength 
 
 ### Typing in Chinese, Japanese, and other languages
 
-Omarchy runs the [fcitx5](https://fcitx-im.org/) input method framework as part of every session — it's what powers the CapsLock compose sequences. That means the plumbing for non-Latin input is already in place: install an input engine like `fcitx5-mozc` (Japanese) or `fcitx5-chinese-addons` (Chinese) with `omarchy pkg add`, plus `fcitx5-configtool` to add the engine to your input methods and set the key that switches between them.
+Select Japanese, Korean, Chinese (Simplified, Pinyin), or Chinese (Traditional, Zhuyin) when the installer asks for your keyboard. Omarchy configures the keyboard and matching input engine automatically, including during offline first-boot setup. Japanese uses Mozc, Korean uses standard two-set Hangul, Simplified Chinese uses Pinyin, and Traditional Chinese uses Chewing's standard Zhuyin arrangement. Japanese (US keyboard) provides Mozc with a US keyboard layout.
+
+Typing starts in Latin mode. Press `Ctrl + Shift + Space` to switch input on or off. On Japanese keyboards, 全角/半角 toggles input, 変換 turns it on, and 無変換 turns it off. On a Korean keyboard layout, dedicated 한/영 and 한자 keys switch Hangul and convert to Hanja. `Ctrl + Space` stays available for Tmux and Herdr; CapsLock stays the compose key.
+
+To add another language later, use _Setup > Input Language_ or run `omarchy setup input` (or `omarchy setup input mozc`, `hangul`, `pinyin`, or `chewing`). Your existing input methods and custom switching keys are preserved. For alternative engine layouts or keys, install `fcitx5-configtool` with `omarchy pkg add fcitx5-configtool` and launch it from a terminal. Selecting an input language does not change the desktop language.
+
+On keyboards without dedicated input keys, use `Ctrl + Shift + Space`. This input shortcut takes precedence over app shortcuts such as code completion; you can change it in `fcitx5-configtool`. Tapping Shift alone is not an input switch: Omarchy uses both Shift keys for CapsLock, which changes how input methods see Shift release. Input engines and the CapsLock compose sequences use the [Fcitx5](https://fcitx-im.org/) service already running in every session.
 
 ### Use ALT as SUPER
 
