@@ -98,6 +98,19 @@ class InputMethodTest(unittest.TestCase):
     self.assertEqual(config["Hotkey/EnumerateGroupForwardKeys"], {})
     self.assertNotIn("Control+space", config["Hotkey/TriggerKeys"].values())
 
+  def test_existing_engine_inherited_hotkeys_are_preserved(self):
+    path = self.config / "fcitx5/config"
+    setup.atomic_write(path, "[Behavior]\nActiveByDefault=True\n")
+    setup.defaults(self.config, fresh=False)
+    self.assertEqual(path.read_text(), "[Behavior]\nActiveByDefault=True\n")
+
+  def test_korean_preference_yields_to_a_later_keyboard_change(self):
+    self.preference.write_text("INPUT_METHOD=hangul\nXKB_LAYOUT=kr\n")
+    self.assertEqual(setup.selection(), ("hangul", "kr"))
+    for layout, variant, expected in [("de", "nodeadkeys", "de-nodeadkeys"), ("us", "intl", "us-intl")]:
+      self.vconsole.write_text(f"XKBLAYOUT={layout}\nXKBVARIANT={variant}\n")
+      self.assertEqual(setup.selection(), ("hangul", expected))
+
   def test_live_append_keeps_every_method_and_layout(self):
     info = json.dumps({"data": ["de-nodeadkeys", [["keyboard-de-nodeadkeys", ""], ["mozc", "jp"]]]})
     updated = json.dumps({"data": ["de-nodeadkeys", [["keyboard-de-nodeadkeys", ""], ["mozc", "jp"], ["hangul", ""]]]})

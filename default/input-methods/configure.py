@@ -83,7 +83,8 @@ def defaults(config_home, fresh=False):
       existing = sections(original)
       additions = []
       for section, entries in sections(shipped).items():
-        if not fresh and section == "Hotkey/TriggerKeys":
+        # Missing hotkey sections also represent a choice: Fcitx's defaults.
+        if not fresh and section.startswith("Hotkey/"):
           continue
         # Existing lists (including explicitly empty lists) are user choices.
         # A fresh profile has no working IME shortcut to preserve.
@@ -163,7 +164,7 @@ def selection():
   preference = values(read(Path(os.environ.get("OMARCHY_INPUT_SELECTION", "/etc/omarchy/input-method"))))
   layout = vconsole.get("XKBLAYOUT", "us").split(",")[0] or "us"
   variant = vconsole.get("XKBVARIANT", "").split(",")[0]
-  if preference.get("XKB_LAYOUT") == "kr":
+  if preference.get("XKB_LAYOUT") == "kr" and vconsole.get("XKBLAYOUT", "us") == "us" and not variant:
     layout, variant = "kr", ""
   method = preference.get("INPUT_METHOD", "mozc" if layout == "jp" else "none")
   if method not in PRESETS:

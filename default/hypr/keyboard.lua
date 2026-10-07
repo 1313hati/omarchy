@@ -31,7 +31,9 @@ end
 
 function keyboard.installed()
   local values = keyboard.vconsole()
-  if read_values("/etc/omarchy/input-method").XKB_LAYOUT == "kr" then
+  if read_values("/etc/omarchy/input-method").XKB_LAYOUT == "kr"
+    and (values.XKBLAYOUT or "us") == "us"
+    and (values.XKBVARIANT or "") == "" then
     values.XKBLAYOUT, values.XKBVARIANT = "kr", ""
   end
   return values
