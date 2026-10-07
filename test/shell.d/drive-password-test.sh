@@ -7,8 +7,9 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 # omarchy-drive-password against fake drives. findmnt and lsblk describe a
 # system drive under / and a data drive, and blkid has the empty cache a user
 # sees until root runs blkid in that boot; cryptsetup is either a slot-table fake
-# or the real binary on file-backed volumes; a chpasswd fake shows the login and
-# root passwords never change. Each cryptsetup call is a crash point, so a run
+# or the real binary on file-backed volumes; chpasswd records the accounts, and
+# gum confirm answers TEST_CONFIRM (no by default) when asked whether they follow
+# the system disk. Each cryptsetup and chpasswd call is a crash point, so a run
 # can be killed after every step and rerun, like a power loss. The runs repeat on an Apple fixture,
 # where a fake boot package records the owner's slot through the real
 # omarchy-lifecycle-dispatch; on the x86 fixture that is a no-op.
@@ -80,6 +81,14 @@ SH
 
 cat >"$tmp/bin/gum" <<'SH'
 #!/bin/bash
+if [[ $1 == "confirm" ]]; then
+  printf '%s\n' "$*" >>"$TEST_TMP/prompts"
+  case ${TEST_CONFIRM:-no} in
+    yes) exit 0 ;;
+    no) exit 1 ;;
+    *) exit 130 ;;
+  esac
+fi
 [[ $1 == "input" ]] || exit 97
 printf '%s\n' "$*" >>"$TEST_TMP/prompts"
 [[ -s $TEST_TMP/inputs ]] || exit 130
@@ -107,11 +116,14 @@ cat >"$tmp/bin/chpasswd" <<'SH'
 source "$TEST_TMP/crash.sh"
 IFS= read -r line
 name=${line%%:*}
+crash_point "chpasswd $name"
+[[ $name != "${TEST_CHPASSWD_FAIL:-}" ]] || exit 1
 {
   grep -v "^$name	" "$TEST_TMP/accounts" || true
   printf '%s\t%s\n' "$name" "${line#*:}"
 } >"$TEST_TMP/accounts.next"
 mv -f "$TEST_TMP/accounts.next" "$TEST_TMP/accounts"
+crash_point "$name password set"
 SH
 
 # A LUKS1-style volume as a table of "slot<TAB>passphrase" lines next to the
@@ -306,7 +318,7 @@ volume() {
 # / on the system drive, which also holds a recovery key; a data drive beside it.
 fixture() {
   rm -rf "$tmp/state" "$tmp/output" "$tmp/trace" "$tmp/offered" "$tmp"/dev/* "$tmp/slot-record" "$tmp/record-fail" "$tmp/owner-slot" "$tmp/owner-query-fail" "$tmp/owner-query-garbage" "$tmp/owner-unrecorded"
-  unset TEST_ENROLL_AT_PROMPT TEST_ENROLL_DEVICE TEST_OPEN_FAIL TEST_CHANGE_FAIL TEST_CHANGE_PARTIAL TEST_KILL_FAIL TEST_FINDMNT_FAIL TEST_TOKEN_SLOT CRASH_ORPHAN
+  unset TEST_ENROLL_AT_PROMPT TEST_ENROLL_DEVICE TEST_OPEN_FAIL TEST_CHPASSWD_FAIL TEST_CONFIRM TEST_CHANGE_FAIL TEST_CHANGE_PARTIAL TEST_KILL_FAIL TEST_FINDMNT_FAIL TEST_TOKEN_SLOT CRASH_ORPHAN
   system=$tmp/dev/system
   recovery=${1-$recovery_key}
   volume "$system" "$old_password" "$recovery"
@@ -776,3 +788,114 @@ echo "$data" >"$tmp/select"
 attempt 0 "$data_password" "$new_password" "$new_password" || fail "apple: a data drive changes" "$(cat "$tmp/output")"
 [[ ! -e $tmp/slot-record && -n $(opens "$data" "$new_password") ]] || fail "apple: a data drive records no slot"
 pass "apple: only the system disk's slot is recorded"
+
+# With the owner's yes, the login and root passwords follow the system disk,
+# and only once the disk has taken the new key.
+synced() {
+  local context=$1 password=$2 other=$old_password
+  [[ $password == "$old_password" ]] && other=$new_password
+  [[ $(account owner) == "$password" && $(account root) == "$password" ]] ||
+    fail "$backend: $context: the login and root passwords are the disk password" "$(cat "$tmp/accounts" "$tmp/output")"
+  [[ -n $(opens "$system" "$password") && -z $(opens "$system" "$other") ]] ||
+    fail "$backend: $context: only that password opens the disk" "$(cat "$tmp/trace" "$tmp/output")"
+  [[ ! -e $journal ]] || fail "$backend: $context: the journal is gone" "$(cat "$journal")"
+  recorded "$context" "$password"
+}
+
+for run_spec in "fake x86" "fake apple"; do
+  use $run_spec
+
+  fixture
+  export TEST_CONFIRM=yes
+  attempt 0 "$old_password" "$new_password" "$new_password" || fail "$backend $platform: an agreed sync succeeds" "$(cat "$tmp/output")"
+  synced "agreed" "$new_password"
+  grep -Fq -- '--default=false' "$tmp/prompts" || fail "$backend $platform: the question defaults to no" "$(cat "$tmp/prompts")"
+  grep -Fq 'login password for owner and the root password' "$tmp/prompts" || fail "$backend $platform: the question names the login user and root" "$(cat "$tmp/prompts")"
+  first_account=$(grep -n 'chpasswd' "$tmp/trace" | head -1 | cut -d: -f1)
+  last_luks=$(grep -n 'cryptsetup' "$tmp/trace" | tail -1 | cut -d: -f1)
+  (( last_luks < first_account )) || fail "$backend $platform: the disk key changes and is verified before any account" "$(cat "$tmp/trace")"
+  no_secrets "agreed"
+  sync_steps=$(cat "$tmp/steps")
+  pass "$backend $platform: with the owner's yes, the disk key changes and verifies first, then the login and root passwords follow"
+
+  for (( step = 1; step <= sync_steps; step++ )); do
+    for answer in "$new_password" "$old_password"; do
+      fixture
+      export TEST_CONFIRM=yes
+      if attempt "$step" "$old_password" "$new_password" "$new_password"; then fail "$backend $platform: the agreed run is killed at step $step"; fi
+      point=$(sed -n "${step}p" "$tmp/trace")
+      login=$(account owner)
+      [[ $login == "$old_password" || -n $(opens "$system" "$login") ]] ||
+        fail "$backend $platform: killed after '$point': the login password changes only after the disk takes it"
+      if [[ ! -e $journal ]]; then
+        synced "agreed, killed after '$point'" "$login"
+        continue
+      fi
+      [[ -n $(opens "$system" "$answer") ]] || continue
+      if grep -qx 'phase=\(accounts\|record\)' "$journal" && [[ $answer == "$old_password" ]]; then
+        if attempt 0 "$answer"; then fail "$backend $platform: after '$point' a confirmed change refuses the old password"; fi
+        answer=$new_password
+      fi
+      export TEST_CONFIRM=no
+      attempt 0 "$answer" || fail "$backend $platform: the rerun after '$point' finishes" "$(cat "$tmp/output")"
+      synced "agreed, rerun with $answer after '$point'" "$answer"
+    done
+  done
+  pass "$backend $platform: an agreed change killed after each of $sync_steps steps ends on one password for the disk, login and root, as the journal remembers the answer"
+done
+
+use fake x86
+fixture
+export TEST_CONFIRM=yes TEST_CHPASSWD_FAIL=root
+if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "a failed root password change fails the command"; fi
+grep -qx 'phase=accounts' "$journal" && [[ $(account root) == "$old_password" ]] || fail "a failed root password change keeps the journal" "$(cat "$journal")"
+unset TEST_CHPASSWD_FAIL
+if attempt 0 "$old_password"; then fail "a confirmed change refuses the old password"; fi
+attempt 0 "$new_password" || fail "the rerun sets the root password" "$(cat "$tmp/output")"
+synced "rerun after a failed root password change" "$new_password"
+pass "a failed account change is finished by the next run"
+
+fixture
+export TEST_CONFIRM=abort
+if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "Ctrl-C at the question cancels the change"; fi
+[[ ! -s $tmp/sudo-calls && ! -e $journal && -n $(opens "$system" "$old_password") ]] || fail "a cancelled question changes nothing"
+untouched_accounts "cancelled question"
+pass "Ctrl-C at the question cancels the whole change"
+
+fixture
+echo "$data" >"$tmp/select"
+export TEST_CONFIRM=yes
+attempt 0 "$data_password" "$new_password" "$new_password" || fail "a data drive changes" "$(cat "$tmp/output")"
+! grep -q '^confirm' "$tmp/prompts" || fail "a data drive asks nothing about the accounts" "$(cat "$tmp/prompts")"
+untouched_accounts "data drive with yes"
+pass "a data drive never asks about the login password"
+
+fixture
+export TEST_CONFIRM=yes
+SUDO_USER=root
+attempt 0 "$old_password" "$new_password" "$new_password" || fail "without a login user the system disk still changes" "$(cat "$tmp/output")"
+SUDO_USER=owner
+! grep -q '^confirm' "$tmp/prompts" || fail "without a login user the accounts are not offered" "$(cat "$tmp/prompts")"
+consistent "no login user" "$new_password"
+pass "without a login user the system disk changes alone"
+
+use fake apple
+fixture
+export TEST_CONFIRM=yes
+touch "$tmp/record-fail"
+if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "apple: an agreed change whose slot record fails fails the command"; fi
+grep -qx 'phase=record' "$journal" || fail "apple: a failed record keeps the record phase" "$(cat "$journal")"
+untouched_accounts "agreed change before its slot is recorded"
+rm "$tmp/record-fail"
+attempt 0 "$new_password" || fail "apple: the rerun records the slot and matches the accounts" "$(cat "$tmp/output")"
+synced "agreed change after a failed record" "$new_password"
+pass "apple: the boot checks' slot is recorded before the login and root passwords change"
+
+use fake x86
+fixture
+mkdir -p "${journal%/*}"
+printf 'uuid=uuid-system\nold_slot=0\nslots=0,1\naccounts=maybe\nphase=luks\n' >"$journal"
+if attempt 0 "$old_password"; then fail "a journal with an unknown answer refuses to finish"; fi
+said "is unreadable"
+[[ -e $journal ]] && untouched_accounts "unknown answer" || fail "an unknown answer changes nothing"
+pass "a journal whose answer is neither yes nor no is refused rather than trusted"
