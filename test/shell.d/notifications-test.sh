@@ -271,6 +271,8 @@ const notification = {
   expireTimeout: 1.5
 }
 const snapshot = notifications.snapshotOf(notification, 12345)
+assertEqual(notifications.snapshotOf({ appName: 'Pinyin', appIcon: 'fcitx-pinyin', urgency: 1 }).urgency, 2, 'Pinyin prompts stay visible until dismissed')
+assertEqual(notifications.snapshotOf({ appName: 'Other', appIcon: 'fcitx-pinyin', urgency: 1 }).urgency, 1, 'other notification senders retain their urgency')
 assertDeepEqual(
   {
     id: snapshot.id,

@@ -195,7 +195,9 @@ function snapshotOf(notification, timestamp) {
     image: n.image || "",
     glyph: glyphFromHints(n.hints),
     execArgv: execArgvFromHints(n.hints),
-    urgency: n.urgency,
+    // Pinyin's first-use cloud prediction question needs an explicit answer.
+    // Its normal urgency otherwise dismisses it before users can read it.
+    urgency: n.appName === "Pinyin" && n.appIcon === "fcitx-pinyin" ? 2 : n.urgency,
     expireTimeout: expireTimeout,
     timestamp: timestamp === undefined ? Date.now() : timestamp
   }
