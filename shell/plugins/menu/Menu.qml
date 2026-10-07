@@ -138,6 +138,9 @@ Item {
     var command = String(action || "")
     if (!command) return
 
+    var summon = MenuModel.summonAction(command)
+    if (summon && root.shell && root.shell.summon(summon.id, summon.payload)) return
+
     Util.execDetached(command)
   }
 
@@ -1062,33 +1065,29 @@ Item {
       if (root.guardsPending) Qt.callLater(function() { root.evaluateGuards() })
     }
   }
-  PanelWindow {
+  OverlayWindow {
     id: panel
-    visible: root.opened && root.rowsLoaded
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
+    shown: root.opened && root.rowsLoaded
     WlrLayershell.namespace: "omarchy-menu"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    exclusionMode: ExclusionMode.Ignore
 
     // The card opens centered exactly as always. The first search keystroke
     // or submenu move freezes the top line where it currently sits — from
     // then on the card grows and shrinks downward instead of re-centering
     // on every resize, which made the menu jump around. The rows height is
     // frozen at the same moment, so the starting menu also caps how tall the
-    // card may grow from there. Closing unfreezes both.
+    // card may grow from there. Closing or changing screens unfreezes both.
     property int cardTop: -1
     property int maxRowsHeight: -1
     readonly property int centeredTop: Math.max(Style.gapsOut, Math.round((height - root.cardHeight) / 2))
     readonly property int effectiveCardTop: cardTop >= 0 ? cardTop : centeredTop
     function freezeCardTop() {
-      if (visible && cardTop < 0) {
+      if (shown && cardTop < 0) {
         cardTop = effectiveCardTop
         maxRowsHeight = root.visibleRowsHeight
       }
     }
-    onVisibleChanged: if (!visible) { cardTop = -1; maxRowsHeight = -1 }
+    onShownChanged: if (!shown) { cardTop = -1; maxRowsHeight = -1 }
+    onTargetScreenChanged: { cardTop = -1; maxRowsHeight = -1 }
 
     Rectangle {
       anchors.fill: parent
@@ -1199,6 +1198,7 @@ Item {
           color: "transparent"
 
           Text {
+            textFormat: Text.PlainText
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
@@ -1287,6 +1287,7 @@ Item {
 
               Text {
                 id: iconText
+                textFormat: Text.PlainText
                 visible: row.hasIcon && !row.isApp
                 text: row.icon
                 color: row.hasCursor ? root.selectedText : root.foreground
@@ -1328,6 +1329,7 @@ Item {
 
                 Text {
                   id: labelText
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: row.label
                   color: row.hasCursor ? root.selectedText : root.foreground
@@ -1338,6 +1340,7 @@ Item {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: row.detail
                   visible: (root.filterText || row.kind === "dmenu") && row.detail.length > 0
@@ -1358,6 +1361,7 @@ Item {
                 spacing: 0
 
                 Text {
+                  textFormat: Text.PlainText
                   visible: false
                   text: row.childCount
                   color: root.foreground
@@ -1368,6 +1372,7 @@ Item {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   text: row.kind === "menu" || row.kind === "link" ? "›" : ""
                   color: row.hasCursor ? root.selectedText : root.foreground
                   opacity: row.kind === "menu" || row.kind === "link" ? 0.36 : 0
@@ -1452,6 +1457,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               text: root.filterText ? "No matches for “" + root.filterText + "”" : "Nothing here yet"
               color: root.foreground
               opacity: 0.7
