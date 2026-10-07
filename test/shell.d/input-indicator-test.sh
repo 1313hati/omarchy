@@ -39,4 +39,36 @@ check_cycle("keyboard-us", ["keyboard-us"], None)
 check_cycle("removed", ["keyboard-us", "mozc"], None)
 check_cycle("", [], None)
 print("ok - input cycling covers Latin, multiple engines, single modes, and stale contexts")
+
+entries = [("keyboard-us", "English", "", "input-keyboard", "en", "en", True),
+           ("pinyin", "Pinyin", "", "fcitx-pinyin", "拼", "zh_CN", True)]
+live = {"methods": ["keyboard-us", "pinyin"], "current": "", "name": "", "label": "", "language": ""}
+selected = []
+def fake_call(bus, method, args=None):
+  if method == "AvailableInputMethods":
+    return (entries,)
+  if method == "SetCurrentIM":
+    selected.append(args.unpack()[0])
+    live["current"] = selected[-1]
+    return ()
+  raise AssertionError(method)
+
+with patch.object(indicator, "snapshot", side_effect=lambda bus: dict(live)), patch.object(indicator, "call", side_effect=fake_call):
+  reader = indicator.Indicator(None)
+  assert reader.refresh()["current"] == "keyboard-us"
+  reader.select_next()
+  assert reader.refresh()["current"] == "pinyin"
+  assert reader.pending == "pinyin" and selected == []
+  reader.select_next()
+  assert reader.pending == "keyboard-us"
+  reader.select_next()
+  live["current"] = "keyboard-us"
+  assert reader.refresh()["current"] == "pinyin"
+  assert reader.pending == "" and selected == ["pinyin"]
+  live["current"] = ""
+  reader.select_next()
+  live["methods"] = ["pinyin"]
+  reader.refresh()
+  assert reader.pending == ""
+print("ok - desktop clicks update the label, cycle pending choices, and apply once a text context exists")
 PY

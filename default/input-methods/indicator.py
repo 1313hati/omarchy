@@ -1,6 +1,7 @@
 """Live Fcitx state for the existing keyboard layout widget."""
 
 import json
+import os
 import sys
 
 from gi.repository import Gio, GLib
@@ -32,27 +33,99 @@ def cycle(bus):
     call(bus, "SetCurrentIM", GLib.Variant("(s)", (following,)))
 
 
+class Indicator:
+  def __init__(self, bus):
+    self.bus = bus
+    self.pending = ""
+    self.last = ""
+    self.entries = {}
+
+  def select_next(self):
+    state = snapshot(self.bus)
+    methods = state["methods"]
+    if len(methods) < 2:
+      return
+    current = self.pending or state["current"] or self.last or methods[0]
+    if current not in methods:
+      current = methods[0]
+    self.pending = methods[(methods.index(current) + 1) % len(methods)]
+    self.refresh()
+
+  def refresh(self):
+    state = snapshot(self.bus)
+    methods = state["methods"]
+    if self.pending not in methods:
+      self.pending = ""
+    if self.pending and state["current"]:
+      # Before the first application gains focus Fcitx has no input context.
+      # Retain the click until it has one, without changing startup defaults.
+      call(self.bus, "SetCurrentIM", GLib.Variant("(s)", (self.pending,)))
+      state = snapshot(self.bus)
+      if state["current"] == self.pending:
+        self.pending = ""
+    if state["current"]:
+      self.last = state["current"]
+    else:
+      chosen = self.pending or (self.last if self.last in methods else "") or next(iter(methods), "")
+      if chosen not in self.entries:
+        self.entries = {entry[0]: entry for entry in call(self.bus, "AvailableInputMethods")[0]}
+      entry = self.entries.get(chosen)
+      if entry:
+        state.update(current=entry[0], name=entry[1], label=entry[4], language=entry[5])
+    return state
+
+
 def watch(bus):
   previous = None
+  indicator = Indicator(bus)
+  loop = GLib.MainLoop()
+  buffer = ""
+  timer = 0
 
   def refresh():
     nonlocal previous
     try:
-      state = snapshot(bus)
+      state = indicator.refresh()
     except GLib.Error:
+      indicator.pending = ""
+      indicator.last = ""
       state = {"methods": [], "current": "", "name": "", "language": ""}
     line = json.dumps(state, ensure_ascii=False)
     if line != previous:
       print(line, flush=True)
       previous = line
+
+  def poll():
+    nonlocal timer
+    refresh()
+    timer = GLib.timeout_add(50 if indicator.pending else 500, poll)
+    return GLib.SOURCE_REMOVE
+
+  def command(source, condition):
+    nonlocal buffer, timer
+    data = os.read(sys.stdin.fileno(), 4096)
+    if not data:
+      loop.quit()
+      return GLib.SOURCE_REMOVE
+    buffer += data.decode()
+    while "\n" in buffer:
+      line, buffer = buffer.split("\n", 1)
+      if line == "cycle":
+        try:
+          indicator.select_next()
+        except GLib.Error:
+          indicator.pending = ""
+        refresh()
+    GLib.source_remove(timer)
+    timer = GLib.timeout_add(50 if indicator.pending else 500, poll)
     return GLib.SOURCE_CONTINUE
 
   # Fcitx's controller has no current-method-changed signal. Keep one bus
   # connection open instead of spawning a command on every poll. Polling also
   # follows per-application input contexts and recovers after service restarts.
-  refresh()
-  GLib.timeout_add(500, refresh)
-  GLib.MainLoop().run()
+  GLib.io_add_watch(sys.stdin, GLib.IO_IN | GLib.IO_HUP, command)
+  poll()
+  loop.run()
 
 
 if __name__ == "__main__":
