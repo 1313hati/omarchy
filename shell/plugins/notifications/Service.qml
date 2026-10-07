@@ -235,7 +235,7 @@ Item {
   // about after the popup exists.
   readonly property var updateSignals: [
     "summaryChanged", "bodyChanged", "appNameChanged", "appIconChanged",
-    "imageChanged", "urgencyChanged", "expireTimeoutChanged", "hintsChanged"
+    "imageChanged", "urgencyChanged", "expireTimeoutChanged", "hintsChanged", "actionsChanged"
   ]
 
   // A client that updates a notification through replaces_id does not produce
@@ -427,8 +427,24 @@ Item {
     // libnotify action — they just expect clicking the notification to
     // focus their window. Fall back to focusing the sending app by class so
     // that click-to-jump actually works.
+    if (!invoked && entry.actionsJson && entry.actionsJson !== "[]") return
     if (!invoked) focusApp(entry)
     dismissPopup(index)
+  }
+
+  function invokePopupAction(index, identifier) {
+    if (index < 0 || index >= popupModel.count) return
+    var entry = popupModel.get(index)
+    var ref = entry && !isRestoredRow(entry) ? liveRefs[entry.originalId] : null
+    if (!ref || !ref.actions) return
+    for (var i = 0; i < ref.actions.length; i++) {
+      var action = ref.actions[i]
+      if (action && action.identifier === identifier) {
+        action.invoke()
+        dismissPopup(index)
+        return
+      }
+    }
   }
 
   // Try to focus an existing Hyprland window matching the notification's
@@ -726,6 +742,7 @@ Item {
         image: "",
         glyph: "󰂚",
         execArgv: "",
+        actionsJson: "[]",
         urgency: NotificationUrgency.Low,
         expireTimeout: 0,
         timestamp: Date.now()
@@ -1044,6 +1061,7 @@ Item {
             required property string body
             required property string image
             required property string glyph
+            required property string actionsJson
             required property int urgency
             required property double expireTimeout
             required property double timestamp
@@ -1095,9 +1113,11 @@ Item {
               cornerRadius: service.cornerRadius
               fontFamily: service.shell && service.shell.bar ? service.shell.bar.fontFamily : ""
               glyph: cardSlot.glyph
+              actions: JSON.parse(cardSlot.actionsJson || "[]")
 
               onCloseRequested: service.dismissPopup(cardSlot.index)
               onCardClicked: service.invokePopupDefault(cardSlot.index)
+              onActionClicked: identifier => service.invokePopupAction(cardSlot.index, identifier)
             }
           }
         }
