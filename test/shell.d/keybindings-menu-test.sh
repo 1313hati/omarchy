@@ -64,6 +64,9 @@ rendered=$(keybindings)
 grep -q 'SUPER + F  *→ Full screen' <<<"$rendered" ||
   fail "a chord with no alternative renders on its own" "$rendered"
 pass "the keybindings menu renders its entries"
+grep -q 'CTRL SHIFT + SPACE  *→ Switch input language' <<<"$rendered" ||
+  fail "the input switch shortcut appears in the cheatsheet" "$rendered"
+pass "the input switch shortcut appears in the cheatsheet"
 
 (( $(grep -c '→ Close window$' <<<"$rendered") == 1 )) ||
   fail "an alternative chord joins the row of the first one" "$rendered"

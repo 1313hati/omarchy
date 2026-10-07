@@ -332,6 +332,7 @@ dynamic_bindings() {
 static_bindings() {
   echo "SHIFT ALT,L,Copy URL from Web App,sendshortcut,SHIFT ALT,L,"
   echo "SHIFT ALT,D,Download Video from Web App,sendshortcut,SHIFT ALT,D,"
+  echo "CTRL SHIFT,SPACE,Switch input language,exec,fcitx5-remote -t"
 }
 
 # Actions Omarchy binds to a second chord meant as an alternative, named one at
@@ -533,7 +534,7 @@ output_binding_records_uncached() {
 
 keybindings_cache_key() {
   {
-    printf 'v14\n'
+    printf 'v15\n'
     hyprctl devices 2>/dev/null | grep -F 'active keymap:'
     hyprctl binds 2>/dev/null
   } | sha256sum | awk '{ print $1 }'
