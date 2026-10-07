@@ -47,7 +47,7 @@ notification_log="$tmpdir/notifications.log"
 toggle() {
   env HOME="$home_dir" XDG_STATE_HOME="$home_dir/.local/state" \
     HYPRCTL_LOG="$log_file" NOTIFICATION_LOG="$notification_log" \
-    PATH="$stub_dir:$PATH" "$@" "$ROOT/bin/omarchy-hyprland-workspace-layout-toggle"
+    PATH="$stub_dir:$ROOT/bin:$PATH" "$@" "$ROOT/bin/omarchy-hyprland-workspace-layout-toggle"
 }
 
 saved_mode() {
@@ -227,6 +227,9 @@ hl = {
   dispatch = function() end,
   dsp = { window = { float = function(spec) return spec end, tag = function(spec) return spec end } },
   on = function() end,
+  get_active_workspace = function() return { id = 3 } end,
+  get_config = function() end,
+  config = function() end,
 }
 
 dofile(os.getenv("OMARCHY_PATH") .. "/default/hypr/bootstrap.lua")
@@ -252,6 +255,8 @@ local workspace_rules = {}
 local subscriptions = {}
 local queried = {}
 local all = {}
+local placed = {}
+local config = { ["input.follow_mouse"] = 1, ["general.resize_on_border"] = false, ["decoration.shadow.enabled"] = true }
 
 local function window(address, options)
   options = options or {}
@@ -317,7 +322,9 @@ hl = {
   dispatch = function(action)
     local target = action.window
 
-    if action.tag then
+    if action.kind == "place" then
+      table.insert(placed, target)
+    elseif action.tag then
       local name = action.tag:sub(2)
 
       if action.tag:sub(1, 1) == "+" then
@@ -345,12 +352,28 @@ hl = {
     window = {
       float = function(spec) return spec end,
       tag = function(spec) return spec end,
+      resize = function(spec) spec.kind = "place" return spec end,
+      center = function(spec) spec.kind = "place" return spec end,
+      move = function(spec) spec.kind = "place" return spec end,
     },
   },
   on = function(event, callback)
     subscriptions[event] = subscriptions[event] or {}
     table.insert(subscriptions[event], callback)
   end,
+  -- The move handler waits for the move to land; here it lands at once.
+  timer = function(callback) callback() end,
+  get_active_workspace = function() return { id = 3 } end,
+  get_config = function(key) return config[key] end,
+  config = function(values)
+    for section, options in pairs(values) do
+      for key, value in pairs(options) do
+        config[section .. "." .. key] = value
+      end
+    end
+  end,
+  window_rule = function() end,
+  plugin = { load = function() end },
 }
 
 dofile(os.getenv("OMARCHY_PATH") .. "/default/hypr/bootstrap.lua")

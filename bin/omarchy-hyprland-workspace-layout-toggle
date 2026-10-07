@@ -10,13 +10,7 @@ ACTIVE_WORKSPACE=$(hyprctl activeworkspace -j | jq -r '.id')
 MODES_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/workspace-layouts"
 MODE_FILE="$MODES_DIR/$ACTIVE_WORKSPACE.lua"
 
-# Hyprland only reports the tiled layout, and floating is not one, so the mode is
-# read back from the file this script wrote. Files saved before floating existed
-# name no mode and fall through to what Hyprland reports.
-CURRENT_MODE=$(sed -n 's/.*mode = "\([a-z]*\)".*/\1/p' "$MODE_FILE" 2>/dev/null)
-if [[ -z $CURRENT_MODE ]]; then
-  CURRENT_MODE=$(hyprctl activeworkspace -j | jq -r '.tiledLayout')
-fi
+CURRENT_MODE=$(omarchy-hyprland-workspace-layout-current)
 
 case "$CURRENT_MODE" in
   dwindle) NEW_MODE=scrolling ;;
@@ -28,7 +22,12 @@ APPLY="o.workspace_mode({ workspace = \"$ACTIVE_WORKSPACE\", mode = \"$NEW_MODE\
 
 # Saving a mode that did not apply would leave the file naming one layout while
 # the screen shows another, and restore it at the next login.
-if ! hyprctl eval "$APPLY" >/dev/null 2>&1; then
+APPLIED=0
+if hyprctl eval "$APPLY" >/dev/null 2>&1; then
+  APPLIED=1
+fi
+
+if (( ! APPLIED )); then
   omarchy-notification-send -g 󱂬 "Workspace layout needs a Hyprland reload"
 elif mkdir -p "$MODES_DIR" && printf '%s\n' "$APPLY" >"$MODE_FILE"; then
   omarchy-notification-send -g 󱂬 "Workspace layout set to $NEW_MODE"
@@ -36,4 +35,11 @@ else
   # The mode is on screen but nothing will bring it back, and the next press
   # reads the mode from this file, so say so rather than counting it as set.
   omarchy-notification-send -g 󱂬 "Workspace layout set to $NEW_MODE but could not be saved"
+fi
+
+# Titlebars, shadows, and snapping are set up while the config loads, and only
+# when something floats, so the first floating workspace needs a reload to get
+# them. Once the titlebar plugin is in, later ones have them already.
+if (( APPLIED )) && [[ $NEW_MODE == "floating" ]] && ! hyprctl plugin list -j 2>/dev/null | jq -e 'any(.[]?; .name == "hyprbars")' >/dev/null 2>&1; then
+  hyprctl reload >/dev/null
 fi

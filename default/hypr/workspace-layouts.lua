@@ -4,7 +4,7 @@ local paths = require("default.hypr.paths")
 local require_all = require("default.hypr.require_all")
 
 -- The saved files call o.workspace_mode, so it has to exist before they load.
-require("default.hypr.workspace-modes")
+local workspace_modes = require("default.hypr.workspace-modes")
 
 local layouts_dir = paths.state_home .. "/omarchy/workspace-layouts"
 
@@ -15,3 +15,7 @@ local layouts_dir = paths.state_home .. "/omarchy/workspace-layouts"
 package.path = paths.state_home .. "/?.lua;" .. package.path
 
 require_all.files(layouts_dir, "omarchy.workspace-layouts", { reload = true })
+
+-- With every saved mode known, bring the open windows in line and set up what a
+-- floating workspace needs.
+workspace_modes.apply()
