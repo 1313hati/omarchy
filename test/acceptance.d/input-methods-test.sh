@@ -19,6 +19,8 @@ fi
 pass "installer input selection reaches the first desktop session"
 
 work=$(mktemp -d)
+dbus-monitor --session "type='method_call',interface='org.freedesktop.Notifications',member='Notify'" > "$ARTIFACTS/input-method-notifications.log" 2>&1 &
+notification_monitor=$!
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 paths=("$config_home/fcitx5" "$config_home/fontconfig/conf.d/50-omarchy-input-method.conf" "$data_home/dbus-1/services/org.fcitx.Fcitx5.service")
@@ -29,6 +31,8 @@ for (( i = 0; i < ${#paths[@]}; i++ )); do
 done
 
 cleanup() {
+  kill "$notification_monitor" 2>/dev/null || true
+  wait "$notification_monitor" 2>/dev/null || true
   close_windows '^org\.omarchy\.ime-test$'
   close_windows '^org\.omarchy\.ime-test-gtk$|^org\.qt-project\.qml$|^chrome-.*_omarchy-ime-entry\.html-Default$'
   systemctl --user stop omarchy-fcitx5.service
@@ -163,3 +167,8 @@ for method in mozc hangul pinyin chewing; do
     wait_until "$toolkit closes" 15 window_absent "$class"
   done
 done
+
+if grep -q 'member=Notify' "$ARTIFACTS/input-method-notifications.log"; then
+  fail "input setup and composition produce no additional notifications" "$(cat "$ARTIFACTS/input-method-notifications.log")"
+fi
+pass "all four input engines remain quiet during setup and composition"
