@@ -43,10 +43,13 @@ manual_file=$manual_dir/omarchy-brightness-keyboard-manual
 { exec {lock_fd}>>"$manual_file.lock"; } 2>/dev/null && flock -w 2 "$lock_fd" 2>/dev/null
 
 if [[ $direction == "off" ]]; then
-  # Auto cannot consume a restore while locked; keep it across a later blank.
+  # Keep an unconsumed restore across blanking unless firmware changed it.
   blank="blank"
-  if [[ -r $manual_file && ( $(<"$manual_file") == "restored "* || $(<"$manual_file") == "blank restored" ) ]]; then
-    blank="blank restored"
+  if [[ -r $manual_file ]]; then
+    blank_current=$(brightnessctl -d "$device" get)
+    if [[ $(<"$manual_file") == "restored $blank_current" || ( $(<"$manual_file") == "blank restored" && $blank_current == "0" ) ]]; then
+      blank="blank restored"
+    fi
   fi
   { echo "$blank" >"$manual_file"; } 2>/dev/null || true
   brightnessctl -sd "$device" set 0 >/dev/null

@@ -359,6 +359,28 @@ tick
 (( $(led) == 226 && paused == 0 )) || fail "a failed restore after a carried restoration is still a lock blank" "brightness=$(led) paused=$paused"
 pass "a failed carried restoration keeps the lock blank recognizable"
 
+lux 400
+tick
+keys restore
+LOCKED=1 tick
+printf '68\n' >"$loop/leds/kbd_backlight/brightness"
+keys off
+keys restore
+tick
+(( $(led) == 68 && paused == 1 )) || fail "a firmware choice before a carried lock blank remains a choice" "brightness=$(led) paused=$paused"
+lux 26
+tick
+keys restore
+keys off
+printf '100\n' >"$loop/leds/kbd_backlight/brightness"
+keys off
+keys restore
+tick
+(( $(led) == 100 && paused == 1 )) || fail "a firmware choice during a carried lock blank remains a choice" "brightness=$(led) paused=$paused"
+pass "firmware choices before or during a carried blank replace the earlier restoration"
+
+lux 400
+tick
 lux 26
 tick
 keys down
