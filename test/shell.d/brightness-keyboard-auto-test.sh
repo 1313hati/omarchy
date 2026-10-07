@@ -135,7 +135,17 @@ if (( restore )); then
   exit 0
 fi
 case ${1:-} in
-  get) cat "$led/brightness" ;;
+  get)
+    if [[ ${TEST_PAUSE_AUTO:-0} == 1 ]]; then
+      reads=$(<"$TEST_BARRIER/reads")
+      echo $(( reads + 1 )) >"$TEST_BARRIER/reads"
+      if (( reads == 1 )); then
+        touch "$TEST_BARRIER/checked"
+        read -r _ <"$TEST_BARRIER/release"
+      fi
+    fi
+    cat "$led/brightness"
+    ;;
   max) cat "$led/max_brightness" ;;
   set)
     (( ! save )) || cp "$led/brightness" "$led/saved"
@@ -303,3 +313,33 @@ env -u XDG_RUNTIME_DIR -u XDG_STATE_HOME HOME="$fallback_home" "$ROOT/bin/omarch
 [[ $(stat -c %a "$fallback_home/.local/state/omarchy") == 700 ]] ||
   fail "the fallback state directory is private" "$(stat -c %a "$fallback_home/.local/state/omarchy")"
 pass "without a runtime directory the keys record their level in a private state directory"
+
+# A brightness key can arrive between auto reading the LED and setting it.
+mkdir "$loop/barrier"
+mkfifo "$loop/barrier/release"
+export TEST_BARRIER="$loop/barrier"
+echo 0 >"$TEST_BARRIER/reads"
+lux 94
+last_set=226
+paused=0
+printf '226\n' >"$loop/leds/kbd_backlight/brightness"
+rm -f "$MANUAL_LEVEL_FILE"
+TEST_PAUSE_AUTO=1 tick & auto_pid=$!
+for _ in {1..200}; do
+  [[ ! -e $TEST_BARRIER/checked ]] || break
+  sleep 0.01
+done
+[[ -e $TEST_BARRIER/checked ]] || fail "the auto tick reaches its update"
+if flock -n "$MANUAL_LEVEL_FILE.lock" true; then
+  keys down
+  key_pid=""
+else
+  keys down & key_pid=$!
+fi
+echo release >"$TEST_BARRIER/release"
+wait "$auto_pid"
+[[ -z $key_pid ]] || wait "$key_pid"
+(( $(led) == 102 )) || fail "a brightness key applies after an auto update already in flight" "got $(led)"
+[[ -r $MANUAL_LEVEL_FILE && $(<"$MANUAL_LEVEL_FILE") == "$(led)" ]] ||
+  fail "a brightness key keeps its chosen level and record together"
+pass "an in-flight auto tick cannot overwrite a brightness key and discard its record"

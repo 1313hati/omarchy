@@ -145,6 +145,11 @@ device=$(basename "$kbd_path")
 max=$(<"$kbd_path/max_brightness")
 [[ $max =~ ^[1-9][0-9]*$ ]] || exit 0
 
+if [[ -z ${XDG_RUNTIME_DIR:-} ]]; then
+  mkdir -p "${MANUAL_LEVEL_FILE%/*}"
+  chmod 700 "${MANUAL_LEVEL_FILE%/*}"
+fi
+
 last_set=""
 paused=0
 pause_lux=0
@@ -214,6 +219,7 @@ left_off() {
 tick() {
   local lux current delta threshold
 
+  flock -n 9 || return 0
   lux=$(read_lux) || return 0
 
   if session_locked || lid_closed; then
@@ -249,7 +255,7 @@ tick() {
   fi
 
   apply_percent "$(lux_to_percent "$lux")"
-}
+} 9>>"$MANUAL_LEVEL_FILE.lock"
 
 tick
 
