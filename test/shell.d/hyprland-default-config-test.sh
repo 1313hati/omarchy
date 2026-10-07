@@ -140,7 +140,8 @@ pass "preinstalled binding variable skips optional application bindings"
 
 no_bindings_home="$tmpdir/no-bindings-home"
 mkdir -p "$no_bindings_home"
-no_bindings_output=$(run_omarchy_bindings "$no_bindings_home" 'omarchy_default_bindings = false')
+no_bindings_output=$(run_omarchy_bindings "$no_bindings_home" 'omarchy_default_bindings = false') ||
+  fail "default binding variable disables all Omarchy bindings"
 [[ -z $no_bindings_output ]] || fail "default binding variable disables all Omarchy bindings" "$no_bindings_output"
 pass "default binding variable disables all Omarchy bindings"
 
@@ -169,7 +170,8 @@ mkdir -p "$missing_bin"
 ln -s "$(command -v lua)" "$missing_bin/lua"
 ln -s "$(command -v lspci)" "$missing_bin/lspci"
 ln -s "$(command -v sort)" "$missing_bin/sort"
-missing_voxtype_output=$(PATH="$missing_bin" run_omarchy_bindings "$voxtype_home")
+missing_voxtype_output=$(PATH="$missing_bin" run_omarchy_bindings "$voxtype_home") ||
+  fail "missing Voxtype skips its bindings"
 if grep -Fq $'SUPER + CTRL + X	Toggle dictation' <<<"$missing_voxtype_output"; then
   fail "missing Voxtype skips its bindings"
 fi
@@ -185,7 +187,8 @@ grep -Fqx $'SUPER + SHIFT + D\tDocker' <<<"$lazydocker_output" ||
   fail "installed Lazydocker keeps its Docker shortcut"
 pass "installed Lazydocker keeps its Docker shortcut"
 
-missing_lazydocker_output=$(PATH="$missing_bin" run_application_bindings "$fresh_home")
+missing_lazydocker_output=$(PATH="$missing_bin" run_application_bindings "$fresh_home") ||
+  fail "missing Lazydocker skips its Docker shortcut"
 if grep -Fq $'SUPER + SHIFT + D\tDocker' <<<"$missing_lazydocker_output"; then
   fail "missing Lazydocker skips its Docker shortcut"
 fi
