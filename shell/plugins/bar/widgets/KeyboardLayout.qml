@@ -36,6 +36,9 @@ BarWidget {
   // xkb's own table rather than maintained by hand.
   property var layoutBriefs: ({})
   readonly property string layoutLabel: KeyboardLayoutModel.shortLabel(layoutFull, layoutBriefs)
+  property var inputState: ({})
+  readonly property bool multipleInputs: (inputState.methods || []).length > 1
+  readonly property string inputLabel: KeyboardLayoutModel.inputLabel(inputState, layoutLabel)
 
   // A query already in flight was started before this event, so it may read the
   // layout the switch replaced. Remember the request and re-run once it lands
@@ -228,7 +231,40 @@ BarWidget {
     onTriggered: root.refresh()
   }
 
-  visible: layoutLabel !== "" && multipleLayouts
+  Process {
+    id: inputWatcher
+    command: ["/usr/bin/python", Quickshell.env("OMARCHY_PATH") + "/default/input-methods/indicator.py"]
+    running: true
+    stdout: SplitParser {
+      onRead: data => {
+        try { root.inputState = JSON.parse(data) } catch (e) {}
+      }
+    }
+    onExited: {
+      root.inputState = ({})
+      inputRestart.restart()
+    }
+  }
+
+  Timer {
+    id: inputRestart
+    interval: 5000
+    onTriggered: inputWatcher.running = true
+  }
+
+  Process {
+    id: inputCycle
+    property int pending: 0
+    command: ["/usr/bin/python", Quickshell.env("OMARCHY_PATH") + "/default/input-methods/indicator.py", "cycle"]
+    onExited: {
+      if (pending > 0) {
+        pending--
+        running = true
+      }
+    }
+  }
+
+  visible: inputLabel !== "" && KeyboardLayoutModel.showIndicator(layoutLabel, multipleLayouts, multipleInputs)
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -236,10 +272,19 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.layoutLabel
+    text: root.inputLabel
     fontSize: Style.font.caption
     horizontalMargin: 6
-    tooltipText: root.layoutFull
-    onPressed: function() { root.cycleLayout() }
+    tooltipText: KeyboardLayoutModel.inputTooltip(root.inputState, root.layoutFull, root.multipleLayouts)
+    onPressed: function(button) {
+      if (root.multipleInputs && button === Qt.LeftButton) {
+        if (inputCycle.running) inputCycle.pending++
+        else inputCycle.running = true
+      } else if (root.multipleLayouts) {
+        root.cycleLayout()
+      } else if (!root.multipleInputs && root.bar) {
+        root.bar.run("omarchy-launch-floating-terminal-with-presentation 'omarchy-setup-input'")
+      }
+    }
   }
 }

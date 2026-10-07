@@ -7,6 +7,22 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 run_node_test <<'JS'
 const model = requireFromRoot('shell/plugins/bar/widgets/KeyboardLayoutModel.js')
 
+const japanese = { methods: ['keyboard-us', 'mozc'], current: 'mozc', name: 'Mozc', language: 'ja' }
+assertEqual(model.inputLabel(japanese, 'EN'), 'あ', 'Japanese input has a distinct active label')
+assertEqual(model.inputLabel({ ...japanese, label: 'ア' }, 'EN'), 'ア', 'the live engine mode takes precedence over its default glyph')
+assertEqual(model.inputLabel({ ...japanese, current: 'keyboard-us' }, 'EN'), 'EN', 'Latin input retains the keyboard label')
+assertEqual(model.inputLabel({}, 'EN'), 'EN', 'a stopped input service retains the keyboard label')
+assertEqual(model.inputLabel({ current: 'hangul' }, 'EN'), '한', 'Korean input has a distinct label')
+assertEqual(model.inputLabel({ current: 'custom', language: 'vi' }, 'EN'), 'VI', 'other engines use their reported language')
+assertEqual(model.inputTooltip(japanese, 'English (US)', false).includes('Space twice'), true, 'Japanese explains character choices')
+assertEqual(model.inputTooltip(japanese, 'English (US)', true).includes('Right-click'), true, 'combined input and layout switching stays discoverable')
+assertEqual(model.inputTooltip({ methods: ['keyboard-fr'] }, 'French', false), 'French\nClick to set up an input language', 'one foreign mode offers input setup')
+assertEqual(model.showIndicator('EN', false, false), false, 'English alone stays hidden')
+assertEqual(model.showIndicator('ENG', false, false), false, 'English before the brief table loads stays hidden')
+assertEqual(model.showIndicator('FR', false, false), true, 'a single non-English layout stays available')
+assertEqual(model.showIndicator('EN', false, true), true, 'Latin with another input mode stays available')
+assertEqual(model.showIndicator('EN', true, false), true, 'multiple keyboard layouts stay available')
+
 // Trimmed from xkbcli list, keeping the format of every section it prints,
 // including the options nested under an option group: those quote their
 // description and print an empty brief, one indent deeper than a layout's.

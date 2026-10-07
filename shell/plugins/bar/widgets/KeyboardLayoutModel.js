@@ -110,6 +110,28 @@ function selectKeyboard(typed, namedByEvent) {
   }, keyboards[0])
 }
 
+function inputLabel(state, fallback) {
+  if (!state || !state.current || state.current.indexOf("keyboard-") === 0) return fallback
+  if (state.label) return String(state.label).substring(0, 3)
+  var labels = { mozc: "あ", hangul: "한", pinyin: "拼", chewing: "注" }
+  return labels[state.current] || shortLabel(state.language || state.name, {})
+}
+
+function inputTooltip(state, layout, multipleLayouts) {
+  if (!state || !state.methods || state.methods.length < 2)
+    return layout + (multipleLayouts ? "" : "\nClick to set up an input language")
+  var text = state.name + "\nClick to switch input language"
+  if (state.methods.indexOf("mozc") !== -1)
+    text += "\nJapanese: type a word, then Space twice for character choices"
+  if (multipleLayouts) text += "\nRight-click to switch keyboard layout"
+  return text
+}
+
+function showIndicator(layoutLabel, multipleLayouts, multipleInputs) {
+  return multipleInputs || (layoutLabel !== "" &&
+    (multipleLayouts || (layoutLabel !== "EN" && layoutLabel !== "ENG")))
+}
+
 function layoutIndex(keyboard) {
   return (keyboard && keyboard.active_layout_index) || 0
 }
@@ -120,6 +142,9 @@ if (typeof module !== "undefined") {
     isTypedKeyboard: isTypedKeyboard,
     layoutBriefs: layoutBriefs,
     selectKeyboard: selectKeyboard,
-    shortLabel: shortLabel
+    shortLabel: shortLabel,
+    inputLabel: inputLabel,
+    inputTooltip: inputTooltip,
+    showIndicator: showIndicator
   }
 }
