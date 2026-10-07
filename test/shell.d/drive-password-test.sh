@@ -7,9 +7,9 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 # omarchy-drive-password against fake drives. findmnt and lsblk describe a
 # system drive under / and a data drive, and blkid has the empty cache a user
 # sees until root runs blkid in that boot; cryptsetup is either a slot-table fake
-# or the real binary on file-backed volumes; chpasswd records the accounts. Each
-# cryptsetup and chpasswd call is a crash point, so a run can be killed after
-# every step and rerun, like a power loss. The runs repeat on an Apple fixture,
+# or the real binary on file-backed volumes; a chpasswd fake shows the login and
+# root passwords never change. Each cryptsetup call is a crash point, so a run
+# can be killed after every step and rerun, like a power loss. The runs repeat on an Apple fixture,
 # where a fake boot package records the owner's slot through the real
 # omarchy-lifecycle-dispatch; on the x86 fixture that is a no-op.
 
@@ -107,14 +107,11 @@ cat >"$tmp/bin/chpasswd" <<'SH'
 source "$TEST_TMP/crash.sh"
 IFS= read -r line
 name=${line%%:*}
-crash_point "chpasswd $name"
-[[ $name != "${TEST_CHPASSWD_FAIL:-}" ]] || exit 1
 {
   grep -v "^$name	" "$TEST_TMP/accounts" || true
   printf '%s\t%s\n' "$name" "${line#*:}"
 } >"$TEST_TMP/accounts.next"
 mv -f "$TEST_TMP/accounts.next" "$TEST_TMP/accounts"
-crash_point "$name password set"
 SH
 
 # A LUKS1-style volume as a table of "slot<TAB>passphrase" lines next to the
@@ -309,7 +306,7 @@ volume() {
 # / on the system drive, which also holds a recovery key; a data drive beside it.
 fixture() {
   rm -rf "$tmp/state" "$tmp/output" "$tmp/trace" "$tmp/offered" "$tmp"/dev/* "$tmp/slot-record" "$tmp/record-fail" "$tmp/owner-slot" "$tmp/owner-query-fail" "$tmp/owner-query-garbage" "$tmp/owner-unrecorded"
-  unset TEST_ENROLL_AT_PROMPT TEST_ENROLL_DEVICE TEST_OPEN_FAIL TEST_CHPASSWD_FAIL TEST_CHANGE_FAIL TEST_CHANGE_PARTIAL TEST_KILL_FAIL TEST_FINDMNT_FAIL TEST_TOKEN_SLOT CRASH_ORPHAN
+  unset TEST_ENROLL_AT_PROMPT TEST_ENROLL_DEVICE TEST_OPEN_FAIL TEST_CHANGE_FAIL TEST_CHANGE_PARTIAL TEST_KILL_FAIL TEST_FINDMNT_FAIL TEST_TOKEN_SLOT CRASH_ORPHAN
   system=$tmp/dev/system
   recovery=${1-$recovery_key}
   volume "$system" "$old_password" "$recovery"
@@ -338,8 +335,7 @@ attempt() {
 consistent() {
   local context=$1 password=$2 other=$old_password
   [[ $password == "$old_password" ]] && other=$new_password
-  [[ $(account owner) == "$password" && $(account root) == "$password" ]] ||
-    fail "$backend: $context: the login and root passwords are the disk password" "$(cat "$tmp/accounts" "$tmp/output")"
+  untouched_accounts "$context"
   [[ -n $(opens "$system" "$password") ]] || fail "$backend: $context: the disk opens with that password" "$(cat "$tmp/output")"
   [[ -z $(opens "$system" "$other") ]] || fail "$backend: $context: the other password no longer opens the disk" "$(cat "$tmp/trace" "$tmp/output")"
   [[ -z $recovery || -n $(opens "$system" "$recovery") ]] || fail "$backend: $context: the recovery key still opens the disk"
@@ -365,6 +361,12 @@ recorded() {
   fi
 }
 
+# The disk password never changes the login or root password.
+untouched_accounts() {
+  [[ $(account owner) == "$old_password" && $(account root) == "$old_password" ]] && ! grep -q 'chpasswd' "$tmp/sudo-calls" ||
+    fail "$backend: $1: the login and root passwords stay as they were" "$(cat "$tmp/accounts" "$tmp/sudo-calls")"
+}
+
 said() {
   grep -Fq "$1" "$tmp/output" || fail "$backend: the command says: $1" "$(cat "$tmp/output")"
 }
@@ -378,15 +380,13 @@ no_secrets() {
   done
 }
 
-# Between runs the disk and the accounts may disagree only while the journal
-# says so, and the accounts never take a password the disk does not.
+# Between runs the disk opens with the old or the new password, and the
+# accounts never change.
 recoverable() {
-  local context=$1 login
-  login=$(account owner)
-  [[ -n $(opens "$system" "$login") || -e $journal ]] ||
-    fail "$backend: $context: a disk that no longer opens with the login password is journaled" "$(cat "$tmp/trace")"
-  [[ $login == "$old_password" || -n $(opens "$system" "$login") ]] ||
-    fail "$backend: $context: the login password changes only after the disk takes it" "$(cat "$tmp/trace")"
+  local context=$1
+  [[ -n $(opens "$system" "$old_password") || -n $(opens "$system" "$new_password") ]] ||
+    fail "$backend: $context: the disk opens with the old or the new password" "$(cat "$tmp/trace")"
+  untouched_accounts "$context"
   [[ ! -e $journal || $(stat -c %a "$journal") == "600" ]] || fail "$backend: $context: the journal is private"
   no_secrets "$context"
 }
@@ -411,14 +411,11 @@ for run_spec in "${matrix[@]}"; do
   attempt 0 "$old_password" "$new_password" "$new_password" || fail "$backend: changing the system disk password succeeds" "$(cat "$tmp/output")"
   consistent "uninterrupted" "$new_password"
   [[ $(opens "$data" "$data_password") == "0" ]] || fail "$backend: the data drive is untouched"
-  first_account=$(grep -n 'chpasswd' "$tmp/trace" | head -1 | cut -d: -f1)
-  last_luks=$(grep -n 'cryptsetup' "$tmp/trace" | tail -1 | cut -d: -f1)
-  (( last_luks < first_account )) || fail "$backend: the disk key changes and is verified before any account" "$(cat "$tmp/trace")"
-  grep -Fq 'login password for owner and root' "$tmp/output" || fail "$backend: the command says the login password follows the system disk"
+  ! grep -Fq 'login password' "$tmp/output" || fail "$backend: the command does not mention the login password" "$(cat "$tmp/output")"
   no_secrets "uninterrupted"
   total_steps=$(cat "$tmp/steps")
-  (( total_steps >= 6 )) || fail "$backend: every change is a crash point" "$(cat "$tmp/trace")"
-  pass "$backend: the system disk key changes and verifies first, then the login and root passwords follow"
+  (( total_steps >= 4 )) || fail "$backend: every change is a crash point" "$(cat "$tmp/trace")"
+  pass "$backend: the system disk key changes and verifies, and the login and root passwords stay as they were"
 
   fixture
   if attempt 0 "not-the-password" "$new_password" "$new_password"; then fail "$backend: a wrong current password fails the command"; fi
@@ -436,11 +433,10 @@ for run_spec in "${matrix[@]}"; do
   echo "$data" >"$tmp/select"
   attempt 0 "$data_password" "$new_password" "$new_password" || fail "$backend: changing a data drive password succeeds" "$(cat "$tmp/output")"
   [[ -n $(opens "$data" "$new_password") && -z $(opens "$data" "$data_password") ]] || fail "$backend: the data drive takes the new password"
-  [[ $(account owner) == "$old_password" && $(account root) == "$old_password" ]] || fail "$backend: a data drive leaves the login and root passwords alone"
+  untouched_accounts "data drive"
   [[ -n $(opens "$system" "$old_password") ]] || fail "$backend: a data drive change leaves the system disk alone"
-  ! grep -q '^chpasswd' "$tmp/sudo-calls" && [[ ! -e $journal ]] || fail "$backend: a data drive change runs no chpasswd and keeps no journal"
-  ! grep -Fq 'login password' "$tmp/output" || fail "$backend: a data drive change does not mention the login password"
-  pass "$backend: changing a non-root encrypted drive's password leaves the login unchanged"
+  [[ ! -e $journal ]] || fail "$backend: a data drive change keeps no journal"
+  pass "$backend: changing a non-root encrypted drive's password leaves the system disk alone"
 
   # Killed after each step, the owner runs the command again and answers with a
   # password that opens the disk now: the new one, or the old one while it still
@@ -452,7 +448,7 @@ for run_spec in "${matrix[@]}"; do
       point=$(sed -n "${step}p" "$tmp/trace")
       recoverable "killed after '$point'"
       if [[ ! -e $journal ]]; then
-        if [[ $(account owner) == "$new_password" ]]; then
+        if [[ -n $(opens "$system" "$new_password") ]]; then
           consistent "killed after '$point'" "$new_password"
         else
           consistent "killed after '$point'" "$old_password"
@@ -460,7 +456,7 @@ for run_spec in "${matrix[@]}"; do
         continue
       fi
       [[ -n $(opens "$system" "$answer") ]] || continue
-      if grep -qx 'phase=accounts' "$journal" && [[ $answer == "$old_password" ]]; then
+      if grep -qx 'phase=record' "$journal" && [[ $answer == "$old_password" ]]; then
         if attempt 0 "$answer"; then fail "$backend: after '$point' a confirmed change refuses the old password"; fi
         [[ -e $journal ]] || fail "$backend: after '$point' a refused rerun keeps the journal"
         answer=$new_password
@@ -476,7 +472,7 @@ for run_spec in "${matrix[@]}"; do
       no_secrets "rerun after '$point'"
     done
   done
-  pass "$backend $platform: killed after each of $total_steps steps, and each rerun after each of its own, the disk, login and root end on one password"
+  pass "$backend $platform: killed after each of $total_steps steps, and each rerun after each of its own, the disk ends on one password and the accounts never change"
 done
 
 use fake x86
@@ -501,25 +497,24 @@ pass "an enrolled token never answers for a password, and its slot is left alone
 fixture
 export TEST_CHANGE_FAIL=1
 if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "a failed luksChangeKey fails the command"; fi
-[[ $(account owner) == "$old_password" && $(account root) == "$old_password" ]] || fail "a failed luksChangeKey leaves both accounts alone"
-! grep -q '^chpasswd' "$tmp/sudo-calls" || fail "a failed luksChangeKey runs no chpasswd"
 [[ -n $(opens "$system" "$old_password") && ! -e $journal ]] || fail "a failed luksChangeKey leaves the disk and no journal"
-pass "a failed LUKS change leaves the login and root passwords unchanged"
+said "The disk password did not change."
+pass "a failed LUKS change leaves the disk on its old password"
 
 fixture
 export TEST_CHANGE_PARTIAL=1
 attempt 0 "$old_password" "$new_password" "$new_password" || fail "a luksChangeKey that dies after adding the new key is finished" "$(cat "$tmp/output")"
 consistent "luksChangeKey died after adding the new key" "$new_password"
-pass "a luksChangeKey that dies between keys has its old key retired before the accounts change"
+pass "a luksChangeKey that dies between keys has its old key retired"
 
 fixture
 export TEST_CHANGE_PARTIAL=1 TEST_KILL_FAIL=1
 if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "a failed retirement fails the command"; fi
-[[ -e $journal && $(account owner) == "$old_password" ]] || fail "a failed retirement keeps the journal and the accounts"
+[[ -e $journal ]] || fail "a failed retirement keeps the journal"
 unset TEST_CHANGE_PARTIAL TEST_KILL_FAIL
 if attempt 0 "$recovery_key"; then fail "an unconfirmed change refuses the recovery key"; fi
 said "That password does not finish the change"
-[[ -e $journal && $(account owner) == "$old_password" && -n $(opens "$system" "$recovery_key") ]] || fail "refusing the recovery key changes nothing"
+[[ -e $journal && -n $(opens "$system" "$recovery_key") ]] || fail "refusing the recovery key changes nothing"
 attempt 0 "$new_password" || fail "the rerun retires the old key and finishes" "$(cat "$tmp/output")"
 consistent "rerun after a failed retirement" "$new_password"
 pass "before the change is confirmed a rerun refuses the recovery key and retires the old key"
@@ -532,15 +527,18 @@ attempt 0 "$old_password" || fail "the rerun with the old password rolls back" "
 consistent "rollback with the old password" "$old_password"
 pass "a rerun with the old password removes the half-added new key"
 
+# On Apple the slot record follows the confirmed change: a crash there leaves
+# the confirmed phase.
+use fake apple
 fixture
 attempt 0 "$old_password" "$new_password" "$new_password"
-chpasswd_step=$(grep -n 'chpasswd owner' "$tmp/trace" | cut -d: -f1)
+record_step=$(grep -n 'slots recorded' "$tmp/trace" | cut -d: -f1)
 fixture
-attempt "$chpasswd_step" "$old_password" "$new_password" "$new_password" || true
-grep -qx 'phase=accounts' "$journal" || fail "a crash before the accounts leaves the confirmed phase" "$(cat "$journal" "$tmp/trace")"
+attempt "$record_step" "$old_password" "$new_password" "$new_password" || true
+grep -qx 'phase=record' "$journal" || fail "a crash at the slot record leaves the confirmed phase" "$(cat "$journal" "$tmp/trace")"
 if attempt 0 "$recovery_key"; then fail "a confirmed change refuses the recovery key"; fi
 said "That password does not finish the change"
-[[ -e $journal && $(account owner) == "$old_password" ]] || fail "refusing the recovery key changes no account"
+[[ -e $journal ]] || fail "refusing the recovery key keeps the journal"
 if attempt 0 "not-the-password"; then fail "a rerun refuses a password that opens nothing"; fi
 for suffix in "" .slots .uuid; do
   mv "$system$suffix" "$tmp/dev/renumbered$suffix"
@@ -549,7 +547,7 @@ system=$tmp/dev/renumbered
 printf '/dev/mapper/root crypt btrfs\n%s part crypto_LUKS\n/dev/fake-disk disk \n' "$system" >"$tmp/root-ancestry"
 attempt 0 "$new_password" || fail "the confirmed change finishes on a renumbered disk" "$(cat "$tmp/output")"
 consistent "rerun after a confirmed change" "$new_password"
-pass "once the new key is confirmed only its slot finishes the accounts, on the disk found by UUID"
+pass "apple: once the new key is confirmed only its slot finishes the change, on the disk found by UUID"
 
 fixture
 export TEST_OPEN_FAIL=1
@@ -559,25 +557,25 @@ said "Could not check the password against $system."
 pass "the current password is checked before anything changes"
 
 fixture
-export TEST_CHPASSWD_FAIL=root
-if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "a failed root password change fails the command"; fi
-[[ $(account owner) == "$new_password" && $(account root) == "$old_password" && -e $journal ]] ||
-  fail "a failed root password change keeps the journal"
-unset TEST_CHPASSWD_FAIL
-attempt 0 "$new_password" || fail "the rerun sets the root password" "$(cat "$tmp/output")"
-consistent "rerun after a failed root password change" "$new_password"
-pass "a failed account change is finished by the next run"
-
-fixture
-attempt "$chpasswd_step" "$old_password" "$new_password" "$new_password" || true
+attempt "$record_step" "$old_password" "$new_password" "$new_password" || true
 export TEST_FINDMNT_FAIL=1
 if attempt 0 "$new_password"; then fail "a run that cannot find / fails"; fi
 said "Could not tell which drive holds the system."
-[[ -e $journal && $(account owner) == "$old_password" ]] || fail "a run that cannot find / keeps the journal and the accounts"
+[[ -e $journal ]] || fail "a run that cannot find / keeps the journal"
 unset TEST_FINDMNT_FAIL
 attempt 0 "$new_password" || fail "the rerun finishes once / is found" "$(cat "$tmp/output")"
 consistent "rerun after a failed root lookup" "$new_password"
-pass "a failed root lookup changes nothing and keeps the journal"
+pass "apple: a failed root lookup changes nothing and keeps the journal"
+
+fixture
+attempt "$record_step" "$old_password" "$new_password" "$new_password" || true
+sed -i 's/^phase=record$/phase=accounts/' "$journal"
+grep -qx 'phase=accounts' "$journal" || fail "the journal is rewritten as an earlier version wrote it" "$(cat "$journal")"
+if attempt 0 "$old_password"; then fail "an earlier version's confirmed change refuses the old password"; fi
+attempt 0 "$new_password" || fail "an earlier version's confirmed change finishes" "$(cat "$tmp/output")"
+consistent "journal from an earlier version" "$new_password"
+pass "apple: a confirmed change journaled by an earlier version records its slot and leaves the accounts alone"
+use fake x86
 
 fixture
 attempt 0 "$old_password" "$new_password" "$new_password"
@@ -603,7 +601,7 @@ mkdir -p "${journal%/*}"
 printf 'uuid=uuid-system\nold_slot=0\nslots=\nphase=luks\n' >"$journal"
 if attempt 0 "$recovery_key"; then fail "a journal without slots refuses to finish"; fi
 said "is unreadable"
-[[ -e $journal && $(account owner) == "$old_password" && -n $(opens "$system" "$old_password") ]] || fail "an unreadable journal changes nothing"
+[[ -e $journal && -n $(opens "$system" "$old_password") ]] || fail "an unreadable journal changes nothing"
 pass "a journal without its slot list is refused rather than trusted"
 
 fixture
@@ -634,16 +632,6 @@ unset TEST_TRACE
 pass "bash -x does not trace passwords"
 
 fixture
-SUDO_USER=root
-if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "the system disk needs a login user"; fi
-said "Run omarchy-drive-password as the user who logs in"
-[[ ! -s $tmp/sudo-calls && ! -e $journal && -n $(opens "$system" "$old_password") ]] || fail "without a login user nothing changes"
-echo "$data" >"$tmp/select"
-attempt 0 "$data_password" "$new_password" "$new_password" || fail "a data drive changes without a login user" "$(cat "$tmp/output")"
-SUDO_USER=owner
-pass "the system disk password changes only for a known login user"
-
-fixture
 printf '/dev/mapper/root lvm btrfs\n/dev/mapper/cryptlvm crypt LVM2_member\n%s part crypto_LUKS\n/dev/fake-disk disk \n' "$system" >"$tmp/root-ancestry"
 attempt 0 "$old_password" "$new_password" "$new_password" || fail "an LVM-on-LUKS system disk changes" "$(cat "$tmp/output")"
 consistent "LVM on LUKS" "$new_password"
@@ -653,12 +641,13 @@ fixture
 printf '/dev/mapper/root part ext4\n/dev/fake-disk disk \n' >"$tmp/root-ancestry"
 echo "$data" >"$tmp/drives"
 attempt 0 "$data_password" "$new_password" "$new_password" || fail "an unencrypted root still changes a data drive" "$(cat "$tmp/output")"
-[[ $(account owner) == "$old_password" && -n $(opens "$data" "$new_password") ]] || fail "an unencrypted root keeps the login password"
+[[ -n $(opens "$data" "$new_password") ]] || fail "an unencrypted root still changes the data drive"
+untouched_accounts "unencrypted root"
 pass "with / unencrypted, every encrypted drive changes alone"
 
 fixture
 mkdir -p "${journal%/*}"
-printf 'uuid=uuid-elsewhere\nphase=accounts\nslot=0\n' >"$journal"
+printf 'uuid=uuid-elsewhere\nphase=record\nslot=0\n' >"$journal"
 attempt 0 "$old_password" "$new_password" "$new_password" || fail "a journal for another disk does not block a change" "$(cat "$tmp/output")"
 consistent "stale journal" "$new_password"
 pass "a journal for a disk that is not / is dropped"
@@ -670,7 +659,7 @@ if attempt 0 "$old_password" "secret123" "*"; then fail "a mismatched confirmati
 said "Passwords do not match."
 if attempt 0 "$old_password" "$old_password" "$old_password"; then fail "the current password is refused as the new one"; fi
 said "The new password is the current one."
-! grep -q 'luksChangeKey\|chpasswd' "$tmp/sudo-calls" && [[ ! -e $journal && $(account owner) == "$old_password" ]] ||
+! grep -q 'luksChangeKey\|chpasswd' "$tmp/sudo-calls" && [[ ! -e $journal ]] ||
   fail "refused passwords change nothing"
 pass "drive password rejects empty, mismatched and unchanged passphrases before changing anything"
 
@@ -710,11 +699,11 @@ touch "$tmp/owner-unrecorded"
 attempt 0 "$old_password" "$new_password" "$new_password" || fail "apple: an unrecorded single-key disk changes its password" "$(cat "$tmp/output")"
 [[ $(cat "$tmp/slot-record") == "owner=$(opens "$system" "$new_password")" ]] || fail "apple: the owner's new slot is recorded" "$(cat "$tmp/slot-record")"
 consistent "no owner slot recorded, one key" "$new_password"
-step=$(grep -n 'chpasswd owner' "$tmp/trace" | head -1 | cut -d: -f1)
+step=$(grep -n 'cryptsetup' "$tmp/trace" | tail -1 | cut -d: -f1)
 fixture ""
 touch "$tmp/owner-unrecorded"
-if attempt "$step" "$old_password" "$new_password" "$new_password"; then fail "apple: the unrecorded change is killed before the accounts"; fi
-[[ -e $journal && ! -e $tmp/slot-record ]] || fail "apple: a change killed before the accounts keeps its journal" "$(cat "$tmp/trace")"
+if attempt "$step" "$old_password" "$new_password" "$new_password"; then fail "apple: the unrecorded change is killed before the slot record"; fi
+[[ -e $journal && ! -e $tmp/slot-record ]] || fail "apple: a change killed before the slot record keeps its journal" "$(cat "$tmp/trace")"
 attempt 0 "$new_password" || fail "apple: the rerun finishes an unrecorded change" "$(cat "$tmp/output")"
 [[ $(cat "$tmp/slot-record") == "owner=$(opens "$system" "$new_password")" ]] || fail "apple: the rerun records the owner's new slot" "$(cat "$tmp/slot-record")"
 consistent "no owner slot recorded, interrupted" "$new_password"
@@ -748,7 +737,7 @@ fixture
 touch "$tmp/record-fail"
 if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "a failed record fails the command"; fi
 said "Could not record the new key slot for the boot checks."
-[[ -e $journal && $(account owner) == "$new_password" && ! -e $tmp/slot-record ]] || fail "a failed record keeps the journal"
+[[ -e $journal && ! -e $tmp/slot-record ]] || fail "a failed record keeps the journal"
 rm "$tmp/record-fail"
 attempt 0 "$new_password" || fail "the rerun records the slot" "$(cat "$tmp/output")"
 [[ -s $tmp/slot-record ]] || fail "the rerun records the moved key's slot"
