@@ -213,7 +213,7 @@ left_off() {
   (( current * 100 <= max * EFFECTIVELY_OFF_PERCENT )) || return 1
   [[ -r $MANUAL_LEVEL_FILE ]] && manual=$(<"$MANUAL_LEVEL_FILE")
   [[ $manual != "$current" ]] || return 1
-  (( current != 0 )) || [[ $manual == "blank" ]]
+  (( current != 0 )) || [[ $manual == "blank" || $manual == "blank restored" ]]
 }
 
 tick() {

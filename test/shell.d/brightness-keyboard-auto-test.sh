@@ -339,6 +339,26 @@ tick
 (( $(led) == 43 && paused == 0 )) || fail "hibernate restore returns to the current room's level" "brightness=$(led) paused=$paused"
 pass "restoring an old level without a blank does not pause automatic brightness"
 
+lux 400
+tick
+keys restore
+LOCKED=1 tick
+keys off
+keys restore
+tick
+(( $(led) == 0 && paused == 0 )) || fail "a restored level carried through lock blank cannot pause auto" "brightness=$(led) paused=$paused"
+pass "a lock blank preserves an unconsumed restoration until automatic brightness can see it"
+
+lux 26
+tick
+keys restore
+LOCKED=1 tick
+keys off
+RESTORE_FAILS=1 keys restore && fail "a failed restore after a carried restoration reports failure"
+tick
+(( $(led) == 226 && paused == 0 )) || fail "a failed restore after a carried restoration is still a lock blank" "brightness=$(led) paused=$paused"
+pass "a failed carried restoration keeps the lock blank recognizable"
+
 lux 26
 tick
 keys down

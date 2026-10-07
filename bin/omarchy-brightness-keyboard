@@ -43,20 +43,25 @@ manual_file=$manual_dir/omarchy-brightness-keyboard-manual
 { exec {lock_fd}>>"$manual_file.lock"; } 2>/dev/null && flock -w 2 "$lock_fd" 2>/dev/null
 
 if [[ $direction == "off" ]]; then
-  { echo blank >"$manual_file"; } 2>/dev/null || true
+  # Auto cannot consume a restore while locked; keep it across a later blank.
+  blank="blank"
+  if [[ -r $manual_file && ( $(<"$manual_file") == "restored "* || $(<"$manual_file") == "blank restored" ) ]]; then
+    blank="blank restored"
+  fi
+  { echo "$blank" >"$manual_file"; } 2>/dev/null || true
   brightnessctl -sd "$device" set 0 >/dev/null
   exit 0
 elif [[ $direction == "restore" ]]; then
-  blanked=0
+  plain_blank=0
   if [[ -r $manual_file && $(<"$manual_file") == "blank" ]]; then
-    blanked=1
+    plain_blank=1
   fi
   # A failed restore leaves the keys blank, so the record must still say so.
   brightnessctl -rd "$device" >/dev/null || exit 1
-  if (( blanked )); then
+  if (( plain_blank )); then
     rm -f "$manual_file" 2>/dev/null
   else
-    # An idle wake or quick unlock can restore an old level without a blank.
+    # A restored level is not a new manual choice, even across a later blank.
     restored_level=$(brightnessctl -d "$device" get) || exit 1
     { printf 'restored %s\n' "$restored_level" >"$manual_file"; } 2>/dev/null || rm -f "$manual_file" 2>/dev/null
   fi
