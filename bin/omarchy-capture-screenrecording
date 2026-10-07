@@ -418,7 +418,14 @@ toggle_screenrecording_indicator() {
 }
 
 screenrecording_active() {
-  select_recorder && omarchy-capture-screenrecording-process "${RECORDER[@]}"
+  if select_recorder && omarchy-capture-screenrecording-process "${RECORDER[@]}"; then
+    return 0
+  else
+    if [[ -f $REC_PID_FILE ]]; then
+      wf_audio_cleanup
+    fi
+    return 1
+  fi
 }
 
 finalize_recording() {
