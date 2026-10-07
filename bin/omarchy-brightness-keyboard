@@ -47,9 +47,19 @@ if [[ $direction == "off" ]]; then
   brightnessctl -sd "$device" set 0 >/dev/null
   exit 0
 elif [[ $direction == "restore" ]]; then
+  blanked=0
+  if [[ -r $manual_file && $(<"$manual_file") == "blank" ]]; then
+    blanked=1
+  fi
   # A failed restore leaves the keys blank, so the record must still say so.
   brightnessctl -rd "$device" >/dev/null || exit 1
-  rm -f "$manual_file" 2>/dev/null
+  if (( blanked )); then
+    rm -f "$manual_file" 2>/dev/null
+  else
+    # An idle wake or quick unlock can restore an old level without a blank.
+    restored_level=$(brightnessctl -d "$device" get) || exit 1
+    { printf 'restored %s\n' "$restored_level" >"$manual_file"; } 2>/dev/null || rm -f "$manual_file" 2>/dev/null
+  fi
   exit 0
 fi
 

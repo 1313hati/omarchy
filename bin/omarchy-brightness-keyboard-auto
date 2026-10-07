@@ -217,7 +217,7 @@ left_off() {
 }
 
 tick() {
-  local lux current delta threshold
+  local lux current delta threshold restored=0
 
   flock -n 9 || return 0
   lux=$(read_lux) || return 0
@@ -227,17 +227,25 @@ tick() {
   fi
 
   current=$(brightnessctl -d "$device" get) || return 0
+  if [[ -r $MANUAL_LEVEL_FILE && $(<"$MANUAL_LEVEL_FILE") == "restored "* ]]; then
+    if [[ $(<"$MANUAL_LEVEL_FILE") == "restored $current" ]]; then
+      restored=1
+    fi
+    rm -f "$MANUAL_LEVEL_FILE"
+  fi
 
   if [[ -n $last_set && $current != "$last_set" ]]; then
     last_set=$current
-    if left_off "$current"; then
-      paused=0
-      # Taken back, so a later 0 nobody recorded is a choice again.
-      rm -f "$MANUAL_LEVEL_FILE"
-    else
-      paused=1
-      pause_lux=$lux
-      return 0
+    if (( ! restored )); then
+      if left_off "$current"; then
+        paused=0
+        # Taken back, so a later 0 nobody recorded is a choice again.
+        rm -f "$MANUAL_LEVEL_FILE"
+      else
+        paused=1
+        pause_lux=$lux
+        return 0
+      fi
     fi
   fi
 

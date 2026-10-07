@@ -314,6 +314,67 @@ env -u XDG_RUNTIME_DIR -u XDG_STATE_HOME HOME="$fallback_home" "$ROOT/bin/omarch
   fail "the fallback state directory is private" "$(stat -c %a "$fallback_home/.local/state/omarchy")"
 pass "without a runtime directory the keys record their level in a private state directory"
 
+# Idle wake and quick unlock restore without a blank, and hibernate's root
+# hook writes zero directly. None of their restores is a manual choice.
+lux 26
+last_set=""
+paused=0
+tick
+keys off
+LOCKED=1 tick
+keys restore
+tick
+(( $(led) == 226 )) || fail "a lock wake still restores keyboard brightness" "got $(led)"
+lux 400
+tick
+(( $(led) == 0 )) || fail "a bright room turns the keys off before idle wake" "got $(led)"
+keys restore
+tick
+(( $(led) == 0 && paused == 0 )) || fail "idle wake cannot make an old restored level pause auto" "brightness=$(led) paused=$paused"
+lux 150
+tick
+printf '0\n' >"$loop/leds/kbd_backlight/brightness"
+keys restore
+tick
+(( $(led) == 43 && paused == 0 )) || fail "hibernate restore returns to the current room's level" "brightness=$(led) paused=$paused"
+pass "restoring an old level without a blank does not pause automatic brightness"
+
+lux 26
+tick
+keys down
+keys off
+LOCKED=1 tick
+keys restore
+tick
+(( $(led) == 201 && paused == 1 )) || fail "a manual level survives lock before the next auto tick" "brightness=$(led) paused=$paused"
+lux 400
+tick
+lux 26
+tick
+keys off
+LOCKED=1 tick
+keys restore
+tick
+keys restore
+tick
+[[ ! -e $MANUAL_LEVEL_FILE ]] || fail "auto consumes a restore record even when its level is unchanged"
+printf '0\n' >"$loop/leds/kbd_backlight/brightness"
+tick
+(( $(led) == 0 && paused == 1 )) || fail "a consumed restore cannot disguise a later firmware choice"
+lux 400
+tick
+lux 26
+tick
+keys restore
+printf '0\n' >"$loop/leds/kbd_backlight/brightness"
+tick
+[[ ! -e $MANUAL_LEVEL_FILE ]] || fail "a firmware key before auto also consumes the unmatched restore"
+lux 94
+printf '226\n' >"$loop/leds/kbd_backlight/brightness"
+tick
+(( $(led) == 226 && paused == 1 )) || fail "an unmatched restore cannot disguise a later firmware choice" "brightness=$(led) paused=$paused"
+pass "restores preserve manual choices and cannot stand in for later firmware choices"
+
 # A brightness key can arrive between auto reading the LED and setting it.
 mkdir "$loop/barrier"
 mkfifo "$loop/barrier/release"
