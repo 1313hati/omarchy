@@ -59,6 +59,7 @@ fi
 pass "app focus restricts title matching to agent terminals"
 
 clients_json='[
+  {"address":"0xunnamed","class":""},
   {"address":"0xbrowser","class":"chromium"},
   {"address":"0xlookalike","class":"chrome-not-teams.microsoft.com__-Default"},
   {"address":"0xteams","class":"chrome-teams.microsoft.com__-Default"}
