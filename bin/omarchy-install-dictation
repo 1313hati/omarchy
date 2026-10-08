@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# omarchy:summary=Install and select a dictation backend
+# omarchy:requires-sudo=true
+# omarchy:args=<voxtype|superwhisper>
+# omarchy:examples=omarchy install dictation superwhisper
+
+set -e
+
+case "${1:-}" in
+  voxtype)
+    omarchy-voxtype-install
+    ;;
+  superwhisper)
+    omarchy-pkg-add superwhisper-bin
+    bash /usr/share/superwhisper/setup-user
+    omarchy-dictation backend superwhisper
+    omarchy-notification-send -g  "Superwhisper Dictation Ready" "Hold Right Alt or F9 to dictate (or toggle with Super + Ctrl + X)." -t 10000
+    superwhisper settings
+    ;;
+  *)
+    echo "Usage: omarchy install dictation <voxtype|superwhisper>" >&2
+    exit 1
+    ;;
+esac

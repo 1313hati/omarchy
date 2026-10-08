@@ -1,0 +1,110 @@
+#!/bin/bash
+
+# omarchy:summary=Record dictation and select its backend
+# omarchy:args=<start|stop|toggle|backend> [voxtype|superwhisper]
+# omarchy:examples=omarchy dictation start | omarchy dictation backend superwhisper
+
+config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/dictation-backend"
+
+configure_backend() {
+  if (($# == 0)); then
+    if [[ -f $config ]]; then
+      read -r backend < "$config"
+      case "$backend" in
+        voxtype|superwhisper) printf '%s\n' "$backend" ;;
+        *) echo "Invalid dictation backend in $config" >&2; exit 1 ;;
+      esac
+    elif omarchy-cmd-present voxtype; then
+      echo "voxtype"
+    elif omarchy-cmd-present superwhisper; then
+      echo "superwhisper"
+    else
+      echo "No dictation backend installed. Install Voxtype or Superwhisper." >&2
+      exit 1
+    fi
+  else
+    if (($# != 1)) || [[ $1 != "voxtype" && $1 != "superwhisper" ]]; then
+      echo "Usage: omarchy dictation backend [voxtype|superwhisper]" >&2
+      exit 1
+    fi
+
+    if omarchy-cmd-missing "$1"; then
+      omarchy-launch-floating-terminal-with-presentation omarchy-install-dictation "$1"
+    else
+      # Superwhisper requires a recording shortcut. Keep its native toggle away
+      # from Omarchy's Right Alt/F9 hold and Super + Ctrl + X toggle.
+      if [[ $1 == "superwhisper" ]]; then
+        # It validates its old hold against live binds before applying a change.
+        # Release our Right Alt bind during that handoff, then restore the config
+        # even if a settings command fails.
+        if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+          trap 'hyprctl reload >/dev/null' EXIT
+          hyprctl eval 'hl.unbind("ALT + Alt_R")' >/dev/null || exit 1
+        fi
+        if ! superwhisper shortcuts set toggle "Alt+Space" >/dev/null || ! superwhisper shortcuts set hold none >/dev/null; then
+          omarchy-notification-send "Dictation setup failed" "Finish any recording and try selecting Superwhisper again."
+          exit 1
+        fi
+      fi
+
+      # The selected backend's integration now loads from Omarchy defaults.
+      # Retire only Superwhisper's generated block, preserving personal binds.
+      python3 - "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua" <<'PY' || exit 1
+from pathlib import Path
+import re
+import shutil
+import sys
+import time
+
+path = Path(sys.argv[1])
+if path.is_file():
+  original = path.read_text()
+  updated = re.sub(r"(?m)^-- Superwhisper managed shortcuts BEGIN\n.*?^-- Superwhisper managed shortcuts END(?:\n|$)", "", original, flags=re.S)
+  if updated != original:
+    shutil.copy2(path, path.with_name(path.name + ".bak." + str(time.time_ns())))
+    path.write_text(updated)
+PY
+      mkdir -p "${config%/*}" || exit 1
+      printf '%s\n' "$1" > "$config" || exit 1
+
+      # Backend integration follows the selection even when switching to Voxtype.
+      if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} && $1 != "superwhisper" ]]; then
+        hyprctl reload >/dev/null
+      fi
+    fi
+  fi
+}
+
+case "${1:-}" in
+  backend)
+    shift
+    configure_backend "$@"
+    ;;
+  start|stop|toggle)
+    if (($# != 1)); then
+      echo "Usage: omarchy dictation <start|stop|toggle>" >&2
+      exit 1
+    fi
+    action=$1
+    backend=$(configure_backend) || exit 1
+    if omarchy-cmd-missing "$backend"; then
+      echo "The selected dictation backend ($backend) is not installed." >&2
+      exit 1
+    fi
+
+    case "$backend" in
+      voxtype) voxtype record "$action" ;;
+      superwhisper)
+        if [[ $action == "toggle" ]]; then
+          superwhisper record
+        else
+          superwhisper "$action"
+        fi
+        ;;
+    esac
+    ;;
+  *)
+    echo "Usage: omarchy dictation <start|stop|toggle|backend> [voxtype|superwhisper]" >&2
+    exit 1
+    ;;
+esac
