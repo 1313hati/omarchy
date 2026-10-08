@@ -13,6 +13,27 @@ assert(notifications.isChromiumDerived('', 'microsoft-edge'), 'notifications det
 assert(!notifications.isChromiumDerived('Slack', ''), 'notifications do not treat unrelated apps as chromium-derived')
 
 assertEqual(
+  notifications.webAppHost('Chromium', '', '<a href="https://teams.microsoft.com/">teams.microsoft.com</a>\n\nSender: hi'),
+  'teams.microsoft.com',
+  'notifications read the sending web app host from a chromium body'
+)
+assertEqual(
+  notifications.webAppHost('Brave Origin', '', '<a href="http://localhost:8765/">localhost:8765</a>\n\nhi'),
+  'localhost',
+  'notifications drop the port from a web app host, as the window class does'
+)
+assertEqual(
+  notifications.webAppHost('Slack', '', '<a href="https://example.com/">example.com</a>'),
+  '',
+  'notifications read no web app host from other senders'
+)
+assertEqual(
+  notifications.webAppHost('Chromium', '', 'See <a href="https://example.com/">this</a>'),
+  '',
+  'notifications read a web app host only from the leading origin link'
+)
+
+assertEqual(
   notifications.sanitizeBody('<img src="x">Hello', 'Slack', ''),
   'Hello',
   'notifications strip inline image tags'
