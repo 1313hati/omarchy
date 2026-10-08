@@ -871,6 +871,8 @@ fixture
 export TEST_CONFIRM=yes TEST_CHPASSWD_FAIL=root
 if attempt 0 "$old_password" "$new_password" "$new_password"; then fail "a failed root password change fails the command"; fi
 grep -qx 'phase=accounts' "$journal" && [[ $(account root) == "$old_password" ]] || fail "a failed root password change keeps the journal" "$(cat "$journal")"
+[[ $(account owner) == "$new_password" ]] || fail "the login password changed before the root update failed"
+grep -Fq 'The login and root password updates did not finish.' "$tmp/output" || fail "a partial account change reports unfinished updates" "$(cat "$tmp/output")"
 unset TEST_CHPASSWD_FAIL
 if attempt 0 "$old_password"; then fail "a confirmed change refuses the old password"; fi
 attempt 0 "$new_password" || fail "the rerun sets the root password" "$(cat "$tmp/output")"
