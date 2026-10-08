@@ -16,7 +16,6 @@ end
 require("default.hypr.envs")
 require("default.hypr.looknfeel")
 require("default.hypr.qconsole")
-require("default.hypr.monitor-removal")
 require("default.hypr.input")
 require("default.hypr.windows")
 
