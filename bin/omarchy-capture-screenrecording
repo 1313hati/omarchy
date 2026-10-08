@@ -282,6 +282,20 @@ start_cancelled() {
   [[ -e $CANCEL_FILE ]]
 }
 
+# Stops a recorder this start launched: TERM, two seconds to exit, then KILL.
+end_launched_recorder() {
+  local pid=$1 waited=0 state
+  kill "$pid" 2>/dev/null
+  while (( waited++ < 20 )); do
+    state=$(<"/proc/$pid/stat") 2>/dev/null || break
+    state=${state##*) }
+    [[ ${state:0:1} != "Z" ]] || break
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+}
+
 start_screenrecording() {
   # A pid left by a recording that ended without a stop would otherwise hide
   # this one from the toggle until it has started and saved its own.
@@ -349,8 +363,7 @@ start_screenrecording() {
     while kill -0 $pid 2>/dev/null && [[ ! -f $filename ]]; do
       start_cancelled && break
       if [[ $target != "portal" ]] && (( ++ticks > READY_TIMEOUT_TICKS )); then
-        kill "$pid" 2>/dev/null
-        wait "$pid" 2>/dev/null
+        end_launched_recorder "$pid"
         wf_audio_cleanup
         rm -f "$filename"
         continue 2
@@ -359,8 +372,7 @@ start_screenrecording() {
     done
 
     if start_cancelled; then
-      kill "$pid" 2>/dev/null
-      wait "$pid" 2>/dev/null
+      end_launched_recorder "$pid"
       wf_audio_cleanup
       rm -f "$filename"
       return 1
@@ -503,12 +515,17 @@ fi
   else
     # A start still in its picker or waiting on its recorder is cancelled, not
     # queued behind: that toggle would otherwise begin another recording.
+    # The start reads CANCEL_FILE only after it removes STARTING_FILE, so a
+    # request left while STARTING_FILE stands is always seen. One that finds it
+    # gone waits its turn, and a request the start used up by then is done.
     if ! flock -w 1 9; then
+      touch "$CANCEL_FILE"
       if [[ -e $STARTING_FILE ]]; then
-        touch "$CANCEL_FILE"
         exit 0
       fi
       flock 9 || exit 1
+      [[ -e $CANCEL_FILE ]] || exit 0
+      rm -f "$CANCEL_FILE"
     fi
     if screenrecording_active; then
       stop_screenrecording
@@ -517,11 +534,25 @@ fi
     else
       rm -f "$CANCEL_FILE"
       touch "$STARTING_FILE"
-      start_screenrecording || {
+      if start_screenrecording; then
+        rm -f "$STARTING_FILE"
+        # Cancelled while the recording was being saved as started.
+        if start_cancelled; then
+          end_launched_recorder "$(<"$REC_PID_FILE")"
+          wf_audio_cleanup
+          cleanup_webcam
+          rm -f "$(<"$RECORDING_FILE")" "$REC_PID_FILE" "$RECORDING_FILE"
+          toggle_screenrecording_indicator
+          rm -f "$CANCEL_FILE"
+        fi
+        # A request after that check is left for its requester, who stops this
+        # recording once it has the lock.
+      else
+        rm -f "$STARTING_FILE"
         wf_audio_cleanup
         cleanup_webcam
-      }
-      rm -f "$STARTING_FILE" "$CANCEL_FILE"
+        rm -f "$CANCEL_FILE"
+      fi
     fi
   fi
 } 9>>"$RUNTIME_DIR/omarchy-screenrecord.lock"

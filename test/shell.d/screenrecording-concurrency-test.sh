@@ -32,7 +32,7 @@ for arg in "$@"; do
   if [[ ${next:-} == 1 ]]; then [[ -n ${TEST_NEVER_READY:-} ]] || touch "$arg"; break; fi
   [[ $arg == "-f" ]] && next=1
 done
-trap 'exit 0' TERM INT
+if [[ -n ${TEST_IGNORE_TERM:-} ]]; then trap '' TERM; else trap 'exit 0' TERM INT; fi
 while true; do sleep 0.05; done
 SH
 cat >"$tmp/bin/pactl" <<'SH'
@@ -73,10 +73,27 @@ SH
 for command in omarchy-shell omarchy-notification-send ffprobe pkill; do
   printf '#!/bin/bash\nexit 0\n' >"$tmp/bin/$command"
 done
+cat >"$tmp/bin/omarchy-shell" <<'SH'
+#!/bin/bash
+# A stop that finds no start pending while the start is finishing.
+if [[ -n ${TEST_LATE_STOP:-} && ! -e $TEST_STATE/late-stop-sent ]]; then
+  touch "$TEST_STATE/late-stop-sent"
+  rm -f "$XDG_RUNTIME_DIR/omarchy-screenrecord-starting"
+  TEST_LATE_STOP= "$TEST_RECORD" --stop-recording 9>&- >/dev/null 2>&1 &
+  echo $! >"$TEST_STATE/late-stop-pid"
+  until [[ -e $XDG_RUNTIME_DIR/omarchy-screenrecord-cancel ]]; do sleep 0.05; done
+fi
+if [[ -n ${TEST_PAUSE_INDICATOR:-} && ! -e $TEST_STATE/indicator-paused ]]; then
+  touch "$TEST_STATE/indicator-paused"
+  read -r _ <"$TEST_STATE/release"
+fi
+exit 0
+SH
 chmod +x "$tmp/bin/"*
 export PATH="$tmp/bin:$ROOT/bin:$PATH" TEST_STATE="$tmp" XDG_RUNTIME_DIR="$tmp/runtime"
 export OMARCHY_SCREENRECORD_DIR="$tmp/recordings"
 record="$ROOT/bin/omarchy-capture-screenrecording"
+export TEST_RECORD=$record
 
 wait_for() {
   for _ in {1..200}; do
@@ -146,7 +163,10 @@ pass "a finishing stop cannot remove a concurrent new recording's state"
 for second in toggle stop; do
   # Names are per second, so an earlier recording's file would look ready.
   rm -f "$tmp/recorder-pid" "$tmp/recordings/"*
-  TEST_NEVER_READY=1 "$record" --fullscreen --resolution=1280x800 --with-desktop-audio --with-microphone-audio >/dev/null 2>&1 & pending=$!
+  # The stop's recorder ignores TERM, so ending it needs the KILL that follows.
+  ignore_term=""
+  [[ $second == "stop" ]] && ignore_term=1
+  TEST_IGNORE_TERM=$ignore_term TEST_NEVER_READY=1 "$record" --fullscreen --resolution=1280x800 --with-desktop-audio --with-microphone-audio >/dev/null 2>&1 & pending=$!
   wait_for "$tmp/recorder-pid"
   waiting=$(<"$tmp/recorder-pid")
   args=(--fullscreen --resolution=1280x800)
@@ -161,3 +181,30 @@ for second in toggle stop; do
   done
   pass "a $second during a start that is still waiting on its recorder cancels it"
 done
+
+# A stop that arrives while the start is saving its recording as started still
+# ends that recording.
+rm -f "$tmp/recorder-pid" "$tmp/recordings/"* "$tmp/indicator-paused"
+TEST_PAUSE_INDICATOR=1 "$record" --fullscreen --resolution=1280x800 --with-desktop-audio >/dev/null 2>&1 & pending=$!
+wait_for "$tmp/indicator-paused"
+committed=$(<"$tmp/recorder-pid")
+timeout 5 "$record" --stop-recording >/dev/null 2>&1 || fail "a stop during the start's last step returns"
+echo release >"$tmp/release"
+timeout 5 tail --pid="$pending" -f /dev/null || fail "the start finishes after its last step"
+wait "$pending" || true
+! kill -0 "$committed" 2>/dev/null || fail "a stop during the start's last step ends the recording"
+for state in pid filename pa-modules starting cancel; do
+  [[ ! -e $XDG_RUNTIME_DIR/omarchy-screenrecord-$state ]] || fail "a stop during the start's last step leaves no $state behind"
+done
+pass "a stop while the start saves its recording as started still ends it"
+
+# A stop that finds no start pending while the start is still finishing waits
+# for the lock, and the recording ends either way.
+rm -f "$tmp/recorder-pid" "$tmp/recordings/"* "$tmp/late-stop-sent" "$tmp/late-stop-pid"
+TEST_LATE_STOP=1 "$record" --fullscreen --resolution=1280x800 >/dev/null 2>&1 || fail "the start with a late stop finishes"
+started=$(<"$tmp/recorder-pid")
+timeout 10 tail --pid="$(<"$tmp/late-stop-pid")" -f /dev/null || fail "the late stop finishes"
+! kill -0 "$started" 2>/dev/null || fail "a stop waiting behind a finishing start still ends the recording"
+[[ ! -e $XDG_RUNTIME_DIR/omarchy-screenrecord-pid && ! -e $XDG_RUNTIME_DIR/omarchy-screenrecord-cancel ]] ||
+  fail "a late stop leaves no state behind"
+pass "a stop that waits behind a finishing start still ends the recording"
