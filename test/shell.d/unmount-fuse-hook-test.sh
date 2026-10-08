@@ -35,10 +35,17 @@ if grep -q '^sudo ' "$call_log"; then
 fi
 pass "resume never goes through sudo"
 
+buses=0
 for uid_dir in /run/user/*; do
   if [[ -S $uid_dir/bus ]]; then
+    buses=$((buses + 1))
     grep -q -- "^systemd-run .*--no-block .*--on-active=5 --timer-property=AccuracySec=1s --uid=${uid_dir##*/} .*systemctl --user restart gvfs-daemon.service" "$call_log" ||
       fail "resume schedules a gvfs restart for each user bus" "calls: $(<"$call_log")"
   fi
 done
-pass "resume schedules a gvfs restart for each user bus"
+
+if (( buses > 0 )); then
+  pass "resume schedules a gvfs restart for each user bus"
+else
+  skip "no user bus under /run/user; skipping the gvfs restart scheduling check"
+fi
