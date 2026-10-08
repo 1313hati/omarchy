@@ -29,7 +29,7 @@ cat >"$tmp/bin/wf-recorder" <<'SH'
 #!/bin/bash
 echo "$$" >"$TEST_STATE/recorder-pid"
 for arg in "$@"; do
-  if [[ ${next:-} == 1 ]]; then touch "$arg"; break; fi
+  if [[ ${next:-} == 1 ]]; then [[ -n ${TEST_NEVER_READY:-} ]] || touch "$arg"; break; fi
   [[ $arg == "-f" ]] && next=1
 done
 trap 'exit 0' TERM INT
@@ -138,3 +138,26 @@ if [[ -n $new ]]; then
 fi
 assert_recording
 pass "a finishing stop cannot remove a concurrent new recording's state"
+
+"$record" --stop-recording >/dev/null 2>&1 || fail "the earlier recording stops"
+
+# A recorder that never creates its file keeps the start waiting. Another
+# toggle, or a stop, cancels that start instead of queueing a new one behind it.
+for second in toggle stop; do
+  # Names are per second, so an earlier recording's file would look ready.
+  rm -f "$tmp/recorder-pid" "$tmp/recordings/"*
+  TEST_NEVER_READY=1 "$record" --fullscreen --resolution=1280x800 --with-desktop-audio --with-microphone-audio >/dev/null 2>&1 & pending=$!
+  wait_for "$tmp/recorder-pid"
+  waiting=$(<"$tmp/recorder-pid")
+  args=(--fullscreen --resolution=1280x800)
+  [[ $second == "stop" ]] && args=(--stop-recording)
+  timeout 5 "$record" "${args[@]}" >/dev/null 2>&1 || fail "a $second during a pending start returns at once"
+  timeout 5 tail --pid="$pending" -f /dev/null || fail "the pending start ends once a $second cancels it"
+  wait "$pending" || true
+  ! kill -0 "$waiting" 2>/dev/null || fail "a cancelled start stops its recorder"
+  [[ $(<"$tmp/recorder-pid") == "$waiting" ]] || fail "a $second during a pending start does not begin another recording"
+  for state in pid filename pa-modules starting cancel; do
+    [[ ! -e $XDG_RUNTIME_DIR/omarchy-screenrecord-$state ]] || fail "a cancelled start leaves no $state behind"
+  done
+  pass "a $second during a start that is still waiting on its recorder cancels it"
+done

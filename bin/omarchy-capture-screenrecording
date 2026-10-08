@@ -52,6 +52,13 @@ REGION_FILE="$RUNTIME_DIR/omarchy-screenrecord-region"
 REC_PID_FILE="$RUNTIME_DIR/omarchy-screenrecord-pid"
 # The PulseAudio module ids of a combined-audio null sink, for cleanup.
 PA_MODULES_FILE="$RUNTIME_DIR/omarchy-screenrecord-pa-modules"
+# Present while a start holds the lock; another toggle or stop then leaves
+# CANCEL_FILE for that start instead of queueing behind its picker or recorder.
+STARTING_FILE="$RUNTIME_DIR/omarchy-screenrecord-starting"
+CANCEL_FILE="$RUNTIME_DIR/omarchy-screenrecord-cancel"
+# How long a recorder may take to create its file, except through the portal,
+# whose picker waits on the user.
+READY_TIMEOUT_TICKS=75
 LOG_FILE=$([[ ${OMARCHY_SCREENRECORD_DEBUG:-false} == "true" ]] && echo "$RUNTIME_DIR/omarchy-screenrecord.log" || echo "/dev/null")
 
 for arg in "$@"; do
@@ -271,6 +278,10 @@ launch_wf_recorder() {
   REC_PID=$!
 }
 
+start_cancelled() {
+  [[ -e $CANCEL_FILE ]]
+}
+
 start_screenrecording() {
   # A pid left by a recording that ended without a stop would otherwise hide
   # this one from the toggle until it has started and saved its own.
@@ -290,6 +301,7 @@ start_screenrecording() {
     capture_args=(-w portal -s "${RESOLUTION:-$(default_resolution)}")
   else
     target=$(select_capture_target) || return 1
+    start_cancelled && return 1
 
     case $target in
     monitor:*)
@@ -303,6 +315,7 @@ start_screenrecording() {
   fi
 
   [[ $WEBCAM == "true" ]] && start_webcam_overlay "$target"
+  start_cancelled && return 1
 
   local filename="$OUTPUT_DIR/screenrecording-$(date +'%Y-%m-%d_%H-%M-%S').mp4"
   local backend pid=""
@@ -332,9 +345,26 @@ start_screenrecording() {
       pid=$!
     fi
 
+    local ticks=0
     while kill -0 $pid 2>/dev/null && [[ ! -f $filename ]]; do
+      start_cancelled && break
+      if [[ $target != "portal" ]] && (( ++ticks > READY_TIMEOUT_TICKS )); then
+        kill "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+        wf_audio_cleanup
+        rm -f "$filename"
+        continue 2
+      fi
       sleep 0.2
     done
+
+    if start_cancelled; then
+      kill "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      wf_audio_cleanup
+      rm -f "$filename"
+      return 1
+    fi
 
     if kill -0 $pid 2>/dev/null; then
       echo "$pid" >"$REC_PID_FILE"
@@ -471,16 +501,27 @@ fi
       select_recorder && omarchy-capture-screenrecording-process "${RECORDER[@]}"
     fi
   else
-    flock 9 || exit 1
+    # A start still in its picker or waiting on its recorder is cancelled, not
+    # queued behind: that toggle would otherwise begin another recording.
+    if ! flock -w 1 9; then
+      if [[ -e $STARTING_FILE ]]; then
+        touch "$CANCEL_FILE"
+        exit 0
+      fi
+      flock 9 || exit 1
+    fi
     if screenrecording_active; then
       stop_screenrecording
     elif [[ $STOP_RECORDING == "true" ]]; then
       exit 1
     else
+      rm -f "$CANCEL_FILE"
+      touch "$STARTING_FILE"
       start_screenrecording || {
         wf_audio_cleanup
         cleanup_webcam
       }
+      rm -f "$STARTING_FILE" "$CANCEL_FILE"
     fi
   fi
 } 9>>"$RUNTIME_DIR/omarchy-screenrecord.lock"
