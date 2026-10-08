@@ -24,12 +24,12 @@ done
 
 # systemd kills whatever a sleep hook leaves in the sleep service's cgroup, so
 # nothing of the hook may outlive it; a leftover child would hold this pipe open.
-if ! PATH="$mock_bin:$PATH" timeout 2 bash -c 'bash "$1" post suspend | cat' _ "$hook" >/dev/null; then
+if ! PATH="$mock_bin:$PATH" timeout 2 bash -o pipefail -c 'bash "$1" post suspend | cat' _ "$hook" >/dev/null; then
   fail "resume leaves nothing running behind the hook" "calls: $(<"$call_log")"
 fi
 pass "resume leaves nothing running behind the hook"
 
-# sudo goes through PAM, which prompts for a fingerprint with nobody there to give it.
+# sudo goes through PAM, which can stall on a fingerprint prompt nobody is there to answer.
 if grep -q '^sudo ' "$call_log"; then
   fail "resume never goes through sudo" "calls: $(<"$call_log")"
 fi
@@ -37,7 +37,7 @@ pass "resume never goes through sudo"
 
 for uid_dir in /run/user/*; do
   if [[ -S $uid_dir/bus ]]; then
-    grep -q -- "--uid=${uid_dir##*/} .*systemctl --user restart gvfs-daemon.service" "$call_log" ||
+    grep -q -- "^systemd-run .*--no-block .*--on-active=5 --timer-property=AccuracySec=1s --uid=${uid_dir##*/} .*systemctl --user restart gvfs-daemon.service" "$call_log" ||
       fail "resume schedules a gvfs restart for each user bus" "calls: $(<"$call_log")"
   fi
 done
