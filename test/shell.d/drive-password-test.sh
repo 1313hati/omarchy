@@ -815,7 +815,11 @@ synced() {
   recorded "$context" "$password"
 }
 
-for run_spec in "fake x86" "fake apple"; do
+sync_specs=("fake x86" "fake apple")
+if [[ -n ${REAL_CRYPTSETUP:-} ]]; then
+  sync_specs+=("luks2 x86" "luks2 apple" "luks1 x86" "luks1 apple")
+fi
+for run_spec in "${sync_specs[@]}"; do
   use $run_spec
 
   sync_fixture
