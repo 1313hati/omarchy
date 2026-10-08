@@ -327,6 +327,7 @@ assertDeepEqual(
     'remove.ai',
     'remove.service',
     'remove.development',
+    'remove.printing',
     'remove.theme',
     'remove.gaming',
     'remove.browser',
