@@ -791,6 +791,19 @@ pass "apple: only the system disk's slot is recorded"
 
 # With the owner's yes, the login and root passwords follow the system disk,
 # and only once the disk has taken the new key.
+sync_fixture() {
+  fixture
+  printf 'owner\tlogin-password\nroot\troot-password\n' >"$tmp/accounts"
+}
+
+rollback_accounts() {
+  [[ $(account owner) == "login-password" && $(account root) == "root-password" ]] && ! grep -q 'chpasswd' "$tmp/sudo-calls" ||
+    fail "$backend $platform: a rolled-back disk change leaves distinct account passwords unchanged" "$(cat "$tmp/accounts" "$tmp/sudo-calls")"
+  [[ -n $(opens "$system" "$old_password") && -z $(opens "$system" "$new_password") && ! -e $journal ]] ||
+    fail "$backend $platform: the disk rollback finishes on the old password" "$(cat "$tmp/output")"
+  recorded "rollback" "$old_password"
+}
+
 synced() {
   local context=$1 password=$2 other=$old_password
   [[ $password == "$old_password" ]] && other=$new_password
@@ -805,7 +818,7 @@ synced() {
 for run_spec in "fake x86" "fake apple"; do
   use $run_spec
 
-  fixture
+  sync_fixture
   export TEST_CONFIRM=yes
   attempt 0 "$old_password" "$new_password" "$new_password" || fail "$backend $platform: an agreed sync succeeds" "$(cat "$tmp/output")"
   synced "agreed" "$new_password"
@@ -820,15 +833,16 @@ for run_spec in "fake x86" "fake apple"; do
 
   for (( step = 1; step <= sync_steps; step++ )); do
     for answer in "$new_password" "$old_password"; do
-      fixture
+      sync_fixture
       export TEST_CONFIRM=yes
       if attempt "$step" "$old_password" "$new_password" "$new_password"; then fail "$backend $platform: the agreed run is killed at step $step"; fi
       point=$(sed -n "${step}p" "$tmp/trace")
       login=$(account owner)
-      [[ $login == "$old_password" || -n $(opens "$system" "$login") ]] ||
+      [[ $login == "login-password" || $login == "$new_password" && -n $(opens "$system" "$login") ]] ||
         fail "$backend $platform: killed after '$point': the login password changes only after the disk takes it"
       if [[ ! -e $journal ]]; then
-        synced "agreed, killed after '$point'" "$login"
+        [[ $login == "login-password" && $(account root) == "root-password" ]] ||
+          fail "$backend $platform: a change killed before its journal leaves the accounts alone"
         continue
       fi
       [[ -n $(opens "$system" "$answer") ]] || continue
@@ -838,10 +852,14 @@ for run_spec in "fake x86" "fake apple"; do
       fi
       export TEST_CONFIRM=no
       attempt 0 "$answer" || fail "$backend $platform: the rerun after '$point' finishes" "$(cat "$tmp/output")"
-      synced "agreed, rerun with $answer after '$point'" "$answer"
+      if [[ $answer == "$old_password" ]]; then
+        rollback_accounts
+      else
+        synced "agreed, rerun with $answer after '$point'" "$answer"
+      fi
     done
   done
-  pass "$backend $platform: an agreed change killed after each of $sync_steps steps ends on one password for the disk, login and root, as the journal remembers the answer"
+  pass "$backend $platform: an interrupted opt-in follows the new disk password or rolls back without changing the accounts"
 done
 
 use fake x86
