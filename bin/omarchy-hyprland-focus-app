@@ -23,7 +23,7 @@ address=$(
     jq -r --arg pattern "$app" --arg host "$web_app_host" \
       'def matches($value): ($value // "") | test($pattern; "i");
        first(
-         (.[] | select($host != "" and ((.class // "") | ascii_downcase | contains("-" + $host + "__")))),
+         (.[] | select($host != "" and ((.class // "") | ascii_downcase | split("__")[0] | sub("^[a-z]+-"; "")) == $host)),
          (.[] | select(matches(.class))),
          (.[] | select(.initialClass == "org.omarchy.agent" and matches(.initialTitle)))
        ).address // empty'

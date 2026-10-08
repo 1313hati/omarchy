@@ -60,6 +60,7 @@ pass "app focus restricts title matching to agent terminals"
 
 clients_json='[
   {"address":"0xbrowser","class":"chromium"},
+  {"address":"0xlookalike","class":"chrome-not-teams.microsoft.com__-Default"},
   {"address":"0xteams","class":"chrome-teams.microsoft.com__-Default"}
 ]'
 PATH="$mock_bin:$PATH" OMARCHY_TEST_CLIENTS_JSON="$clients_json" \

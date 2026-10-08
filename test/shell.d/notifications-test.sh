@@ -713,6 +713,10 @@ assert(
   'notifications service leaves the row and its file alone when a refresh finds nothing changed'
 )
 assert(
+  /NotificationLogic\.webAppHost\(entry\.app, entry\.appIcon, entry\.body\)[\s\S]{0,80}?if \(!invoked \|\| webAppHost\) focusApp\(entry, webAppHost\)/.test(serviceQml),
+  'notifications service focuses the sending web app even after invoking the default action'
+)
+assert(
   /popupModel\.insert\(0, snapshot\)[\s\S]{0,300}?service\.refreshPopup\(notification, snapshot\.originalId, snapshot\.timestamp\)/.test(serviceQml),
   'notifications service catches up on an update that beat the deferred row insert'
 )
