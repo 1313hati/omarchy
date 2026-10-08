@@ -165,6 +165,19 @@ if dispatched 'window.move'; then
 fi
 pass "a window on a special workspace is left where it is"
 
+# Without its note a window would come back at the wrong size, or tiled when it
+# floated on its own account, so one whose note cannot be saved stays put.
+printf '[%s]\n' "$(client 0xbad 2)" >"$fake/clients.json"
+printf 'not a directory\n' >"$tmpdir/runtime-file"
+reset_logs
+if run env XDG_RUNTIME_DIR="$tmpdir/runtime-file" omarchy-hyprland-window-minimize 0xbad 2>/dev/null; then
+  fail "setting a window aside fails when its note cannot be saved"
+fi
+if dispatched 'window.move'; then
+  fail "a window whose note cannot be saved is not moved to the Shelf" "$(cat "$fake/hyprctl.log")"
+fi
+pass "a window whose note cannot be saved stays where it is"
+
 if run omarchy-hyprland-window-minimize 'address:0xabc; rm -rf /' 2>/dev/null; then
   fail "anything but a window address is refused"
 fi
@@ -498,8 +511,9 @@ fi
 pass "Float All Workspaces floats every regular workspace without a layout of its own"
 
 # Turning it off is a fresh start with no default, and the windows it floated
-# have to be given back even though nothing names their workspace any more.
-rm -f "$modes_dir/all.lua"
+# have to be given back even though nothing names their workspace any more. With
+# no workspace given a layout of its own, no saved mode is left to start the mode.
+rm -f "$modes_dir"/*.lua
 if ! run_lua '
 local floated = window("0x1", 1, { floating = true, tags = { "omarchy-mode-floated", "omarchy-floating-workspace" } })
 local dialog = window("0x2", 1, { floating = true, tags = { "omarchy-floating-workspace" } })
@@ -515,6 +529,21 @@ assert(shelved.floating and has_tag(shelved, "omarchy-mode-floated"), "a window 
   fail "turning floating off gives back what it floated, but not what is on the Shelf"
 fi
 pass "turning floating off gives back what it floated, but not what is on the Shelf"
+
+# A tiled window that was fullscreen when its workspace started floating is
+# left as it is, and floats once it comes out of fullscreen.
+printf 'o.workspace_mode({ workspace = "1", mode = "floating" })\n' >"$modes_dir/1.lua"
+if ! run_lua '
+local video = window("0x1", 1, { fullscreen = 2 })
+require("default.hypr.workspace-layouts")
+assert(not video.floating, "a fullscreen window was floated")
+video.fullscreen = 0
+state().subscriptions["window.fullscreen"][1](video)
+assert(video.floating and has_tag(video, "omarchy-mode-floated"), "a window leaving fullscreen on a floating workspace stayed tiled")
+'; then
+  fail "a window leaving fullscreen on a floating workspace floats"
+fi
+pass "a window leaving fullscreen on a floating workspace floats"
 
 # Moving a window to the Shelf, or one being restored from it, is left alone.
 printf 'o.workspace_mode({ workspace = "1", mode = "floating" })\n' >"$modes_dir/1.lua"
@@ -567,3 +596,18 @@ assert(bar.on_double_click:find("maximized", 1, true), "double-clicking a titleb
   fail "titlebars load when a workspace floats and follow the theme"
 fi
 pass "titlebars load when a workspace floats and follow the theme"
+
+# omarchy-theme-set writes the current theme under ~/.local/state even when
+# XDG_STATE_HOME points elsewhere, so that is where the titlebars find it.
+other_state="$tmpdir/other-state"
+mkdir -p "$other_state/omarchy/workspace-layouts"
+cp "$modes_dir/1.lua" "$other_state/omarchy/workspace-layouts/"
+if ! run_lua '
+window("0x1", 1)
+require("default.hypr.workspace-layouts")
+local bar = state().titlebar_config
+assert(bar and bar.bar_color == "rgb(112233)", "titlebars missed the theme with XDG_STATE_HOME elsewhere: " .. tostring(bar and bar.bar_color))
+' TITLEBARS_INSTALLED=1 TITLEBARS_LOADED=1 XDG_STATE_HOME="$other_state"; then
+  fail "titlebars follow the theme when XDG_STATE_HOME points elsewhere"
+fi
+pass "titlebars follow the theme when XDG_STATE_HOME points elsewhere"

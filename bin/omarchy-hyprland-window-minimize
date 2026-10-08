@@ -44,7 +44,8 @@ fi
 MONITOR=$(hyprctl monitors -j | jq -c --argjson id "$(jq '.monitor' <<<"$CLIENT")" 'first(.[] | select(.id == $id)) // {}')
 
 # Written before the window moves, so an interrupted command can never leave a
-# window on the Shelf without a note of where it came from.
+# window on the Shelf without a note of where it came from. A note that cannot
+# be saved stops the window from moving at all.
 jq -n --argjson client "$CLIENT" --argjson normal "$NORMAL" --argjson monitor "$MONITOR" --arg order "$(date +%s%3N)" '
   def area: if $monitor.width then
     ($monitor.width / $monitor.scale) as $w | ($monitor.height / $monitor.scale) as $h
@@ -67,7 +68,7 @@ jq -n --argjson client "$CLIENT" --argjson normal "$NORMAL" --argjson monitor "$
     pinned: $client.pinned,
     tags: ($client.tags // []),
     order: ($order | tonumber)
-  }' >"$SHELF_DIR/$ADDRESS.json.tmp" && mv "$SHELF_DIR/$ADDRESS.json.tmp" "$SHELF_DIR/$ADDRESS.json"
+  }' >"$SHELF_DIR/$ADDRESS.json.tmp" && mv "$SHELF_DIR/$ADDRESS.json.tmp" "$SHELF_DIR/$ADDRESS.json" || exit 1
 
 if [[ $(jq -r '.pinned' <<<"$CLIENT") == "true" ]]; then
   hyprctl dispatch "hl.dsp.window.pin({ action = \"disable\", window = \"$SELECTOR\" })" >/dev/null

@@ -244,6 +244,18 @@ local function watch()
     end, { type = "oneshot", timeout = 1 })
   end)
 
+  -- A fullscreen window is left as it is, so it is arranged once it comes back
+  -- out: a tiled one leaving fullscreen on a floating workspace floats then.
+  hl.on("window.fullscreen", function(window)
+    if tagged(window, RESTORING_TAG) then
+      return
+    end
+
+    hl.timer(function()
+      arrange({ window })
+    end, { type = "oneshot", timeout = 1 })
+  end)
+
   hl.on("workspace.active", update_input)
   hl.on("monitor.focused", update_input)
 end
@@ -274,7 +286,9 @@ end
 
 local function theme_colors()
   local colors = {}
-  local file = io.open(paths.state_home .. "/omarchy/current/theme/colors.toml", "r")
+  -- omarchy-theme-set writes the current theme under ~/.local/state whatever
+  -- XDG_STATE_HOME says, and Hyprland loads the theme's own config from there.
+  local file = io.open(paths.home .. "/.local/state/omarchy/current/theme/colors.toml", "r")
 
   if file then
     for line in file:lines() do
@@ -362,7 +376,11 @@ end
 -- now stand: turning Float All Workspaces off has to give back what it floated,
 -- even though nothing names those workspaces any more.
 function M.apply()
-  if default_mode then
+  -- Turning Float All Workspaces off can leave no saved mode at all to start
+  -- the watchers, while the windows it floated still carry its tags.
+  local leftovers = #hl.get_windows({ tag = FLOATED_TAG }) > 0 or #hl.get_windows({ tag = WORKSPACE_TAG }) > 0
+
+  if anything_floats() or leftovers then
     watch()
   end
 
