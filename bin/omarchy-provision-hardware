@@ -69,12 +69,15 @@ if queue_present; then
   done
 fi
 
-# What the boot image is built from: mkinitcpio's configuration and the kernel
-# command line Limine's entry tool adds (leaves such as intel/fred.sh add to it).
+# What the boot image is built from: mkinitcpio's configuration, the module
+# options its modconf hook copies in (leaves such as nvidia.sh write them), and
+# the kernel command line Limine's entry tool adds (leaves such as intel/fred.sh
+# add to it).
 initramfs_inputs() {
   local file
 
   for file in "$omarchy_image_root/etc/mkinitcpio.conf" "$omarchy_image_root/etc/mkinitcpio.conf.d/"* \
+    "$omarchy_image_root/etc/modprobe.d/"* "$omarchy_image_root/usr/lib/modprobe.d/"* \
     "$omarchy_image_root/etc/default/limine" "$omarchy_image_root/etc/limine-entry-tool.d/"*; do
     [[ -e $file ]] || continue
     printf '%s\0' "$file"

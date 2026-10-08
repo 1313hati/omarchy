@@ -341,6 +341,23 @@ first_boot "$root" >/dev/null || fail "a step that changes the kernel command li
 rm -f "$fixture/install/hardware/cmdline.sh"
 pass "a step that only changed Limine's kernel command line gets the rebuild"
 
+# Module options reach the initramfs through mkinitcpio's modconf hook, so a
+# step that only writes /etc/modprobe.d (as nvidia.sh does) gets the rebuild too.
+reset_logs
+root=$(new_root modprobe)
+write_manifest "$root"
+build "$root" >/dev/null || fail "the fixture image builds"
+cat >"$fixture/install/hardware/modprobe.sh" <<'SH'
+mkdir -p "$OMARCHY_IMAGE_ROOT/etc/modprobe.d"
+echo 'options example flag=1' >"$OMARCHY_IMAGE_ROOT/etc/modprobe.d/example.conf"
+SH
+printf '%s\n' install/hardware/modprobe.sh >"$root/var/lib/omarchy/image/deferred-steps"
+first_boot "$root" >/dev/null || fail "a step that changes module options finishes"
+[[ $(cat "$REBUILDS" 2>/dev/null) == "mkinitcpio -P" ]] ||
+  fail "a step that only changed module options gets the rebuild" "$(cat "$REBUILDS" 2>/dev/null)"
+rm -f "$fixture/install/hardware/modprobe.sh"
+pass "a step that only changed module options gets the rebuild"
+
 # --- The pacman keyring -------------------------------------------------------
 
 # Install finalization makes the pacman keyring on generic aarch64.
