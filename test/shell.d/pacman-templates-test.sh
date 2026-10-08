@@ -82,6 +82,11 @@ sed "s|/etc/pacman|$work/etc/pacman|g" "$ROOT/install/post-install/pacman.sh" >"
 mkdir -p "$work/install/hardware"
 : >"$work/install/hardware/pacman.sh"
 
+# Finalization asks the image helper whether this is an image build, which root
+# answers from the real /var/lib/omarchy; everyone else from the test's root.
+if (( EUID == 0 )); then
+  skip "install finalization copies the platform's channel template and mirrorlist (refuses to run as root)"
+else
 for platform in $platforms; do
   templates=$(omarchy_pacman_templates "$platform")
   # An install built for a channel the platform has no templates for, or for
@@ -92,13 +97,14 @@ for platform in $platforms; do
     rm -rf "$work/etc"
     mkdir -p "$work/etc/pacman.d"
     printf 'offline\n' | tee "$work/etc/pacman.conf" >"$work/etc/pacman.d/mirrorlist"
-    OMARCHY_MIRROR=$channel PLATFORM=$platform OMARCHY_INSTALL="$work/install" PATH="$finalize_bin:$PATH" \
+    OMARCHY_IMAGE_ROOT=$work OMARCHY_MIRROR=$channel PLATFORM=$platform OMARCHY_INSTALL="$work/install" PATH="$finalize_bin:$PATH" \
       bash -e -c 'source "$1"' bash "$work/finalize.sh" >/dev/null || fail "$platform finalization on '$channel'"
     cmp -s "$work/etc/pacman.conf" "$templates/pacman-$expected.conf" || fail "$platform '$channel': finalization copies the $expected template"
     cmp -s "$work/etc/pacman.d/mirrorlist" "$templates/mirrorlist-$expected" || fail "$platform '$channel': finalization copies the $expected mirrorlist"
   done
 done
 pass "install finalization copies the platform's channel template and mirrorlist, or its default channel's when it has none for that channel"
+fi
 
 # ── refresh through the command, with every privileged step a stand-in ───────
 

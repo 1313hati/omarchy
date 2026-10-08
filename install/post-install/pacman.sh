@@ -5,6 +5,7 @@
 # platforms install Arch Linux ARM's before its repositories replace the
 # offline ones, and trust every installed keyring before the first signed sync.
 source "$OMARCHY_PATH/install/helpers/pacman.sh"
+source "$OMARCHY_PATH/install/helpers/image-target.sh"
 platform=$(omarchy-hw-platform)
 templates=$(omarchy_pacman_templates "$platform")
 
@@ -19,9 +20,15 @@ channel=${OMARCHY_MIRROR:-}
 cp -f "$templates/pacman-$channel.conf" /etc/pacman.conf
 cp -f "$templates/mirrorlist-$channel" /etc/pacman.d/mirrorlist
 
+# An image build leaves the keyring to each machine's first boot, so no two
+# share a master key (install/helpers/image-target.sh).
 if [[ $platform == "generic-aarch64" ]]; then
-  pacman-key --init
-  pacman-key --populate
+  if omarchy_image_init && omarchy_image_manifest_present; then
+    install -m 0644 /dev/null "$omarchy_image_keyring_request"
+  else
+    pacman-key --init
+    pacman-key --populate
+  fi
 fi
 
 # Wait for CUPS to own the file, the way omarchy-settings does, so pacman does

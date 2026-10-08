@@ -50,6 +50,9 @@ leaf() {
 
 leaf apple "$hardware_leaf" || fail "apple: the system setup leaf runs" "$(cat "$tmp/output")"
 [[ $(cat "$tmp/ran") == $'setup-boot\nsetup-system' ]] || fail "apple: an install or rerun runs setup-boot, then setup-system, with no argument" "$(cat "$tmp/ran")"
+leaf apple "$hardware_leaf" OMARCHY_IMAGE_DEFERRED_HARDWARE=1 || fail "apple: the system setup leaf runs on an image's first boot"
+[[ $(cat "$tmp/ran") == $'setup-boot image-first-boot\nsetup-system image-first-boot' ]] ||
+  fail "apple: an image's first boot tells setup-boot and setup-system so" "$(cat "$tmp/ran")"
 touch "$tmp/fail-setup-system"
 if leaf apple "$hardware_leaf"; then
   fail "apple: a failed setup-system fails the leaf"
@@ -68,27 +71,33 @@ if leaf apple "$hardware_leaf"; then
 fi
 grep -q "setup-boot on apple-silicon needs omarchy-mac-boot" "$tmp/output" || fail "apple: the failure names the boot package" "$(cat "$tmp/output")"
 mv "$tmp/setup-boot.saved" "$lifecycle/usr/lib/omarchy/mac-boot/setup-boot"
-pass "apple: the system setup leaf runs omarchy-mac-boot's setup-boot, then omarchy-mac's setup-system, and fails with either"
+pass "apple: the system setup leaf runs omarchy-mac-boot's setup-boot, then omarchy-mac's setup-system, says when it is an image's first boot, and fails with either"
 
 touch "$tmp/fail"
-leaf x86 "$hardware_leaf" || fail "x86: the system setup leaf is a no-op" "$(cat "$tmp/output")"
+leaf x86 "$hardware_leaf" OMARCHY_IMAGE_DEFERRED_HARDWARE=1 || fail "x86: the system setup leaf is a no-op" "$(cat "$tmp/output")"
 [[ ! -e $tmp/ran && ! -s $tmp/output ]] || fail "x86: the system setup leaf runs nothing and says nothing" "$(cat "$tmp/output")"
 rm -f "$tmp/fail"
 pass "x86: the system setup leaf is a no-op, even with Mac entrypoints on disk"
 
 # ── user setup ───────────────────────────────────────────────────────────────
 
-leaf apple "$user_leaf" || fail "apple: the user setup leaf runs" "$(cat "$tmp/output")"
+leaf apple "$user_leaf" OMARCHY_IMAGE_ROOT="$tmp/booted" || fail "apple: the user setup leaf runs" "$(cat "$tmp/output")"
 [[ $(cat "$tmp/ran") == "setup-user" ]] || fail "apple: the user setup leaf runs setup-user" "$(cat "$tmp/ran" 2>/dev/null)"
 touch "$tmp/fail"
-if leaf apple "$user_leaf"; then
+if leaf apple "$user_leaf" OMARCHY_IMAGE_ROOT="$tmp/booted"; then
   fail "apple: a failed setup-user fails finalization's leaf"
 fi
 rm -f "$tmp/fail"
-pass "apple: the user setup leaf runs omarchy-mac's setup-user and fails with it"
+
+mkdir -p "$tmp/image/var/lib/omarchy/image"
+: >"$tmp/image/var/lib/omarchy/image/target"
+leaf apple "$user_leaf" OMARCHY_IMAGE_ROOT="$tmp/image" || fail "apple: the user setup leaf succeeds in an image build"
+[[ ! -e $tmp/ran && $(cat "$tmp/output") == *"waits for first run on the machine"* ]] ||
+  fail "apple: an image build leaves the platform's user setup to first run" "$(cat "$tmp/output")"
+pass "apple: the user setup leaf runs omarchy-mac's setup-user, fails with it, and waits for the machine in an image build"
 
 touch "$tmp/fail"
-leaf x86 "$user_leaf" || fail "x86: the user setup leaf is a no-op" "$(cat "$tmp/output")"
+leaf x86 "$user_leaf" OMARCHY_IMAGE_ROOT="$tmp/booted" || fail "x86: the user setup leaf is a no-op" "$(cat "$tmp/output")"
 [[ ! -e $tmp/ran && ! -s $tmp/output ]] || fail "x86: the user setup leaf runs nothing and says nothing" "$(cat "$tmp/output")"
 rm -f "$tmp/fail"
 pass "x86: the user setup leaf is a no-op, even with Mac entrypoints on disk"
